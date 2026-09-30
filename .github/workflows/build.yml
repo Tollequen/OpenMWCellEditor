@@ -38,6 +38,10 @@ jobs:
         shell: bash
         run: |
           VERSION=$(python -c "import celleditor; print(celleditor.__version__)")
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in celleditor/__init__.py ($VERSION)"
+            exit 1
+          fi
           OUT="OpenMW-Cell-Editor-$VERSION-${{ matrix.name }}.zip"
           cp README.md LICENSE dist/
           cd dist
@@ -52,7 +56,7 @@ jobs:
           echo "ZIP=$OUT" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v5
         with:
-          name: ${{ env.ZIP }}
+          name: OpenMW-Cell-Editor-${{ matrix.name }}
           path: ${{ env.ZIP }}
 
   release:
