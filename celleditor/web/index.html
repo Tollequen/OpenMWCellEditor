@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Cell Editor</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cell Editor">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="favicon.png" sizes="32x32">
+<link rel="icon" href="icon-small.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="theme.css">
+<style>
+  :root { --pw: 280px; --float: rgba(43, 45, 49, .95); }
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
+  #view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* Panel: docked at the left, or floating over the view */
+  #panel { position: fixed; top: 10px; left: 10px; width: var(--pw); max-height: calc(100% - 20px); overflow-y: auto;
+           background: var(--float); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow);
+           box-sizing: border-box; display: flex; flex-direction: column; z-index: 2; }
+  body.docked:not(.touch) #panel { top: 0; left: 0; height: 100%; max-height: none; border: none;
+           border-right: 1px solid var(--line); border-radius: 0; box-shadow: none; background: var(--panel); }
+  body.docked:not(.touch):not(.panel-hidden) #view { left: var(--pw); width: calc(100% - var(--pw)); }
+  body.docked:not(.touch):not(.panel-hidden) #crosshair { left: calc(50% + var(--pw) / 2); }
+  body.docked:not(.touch):not(.panel-hidden) #loading { left: calc(var(--pw) + 12px); }
+
+  .phead { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 10px; border-bottom: 1px solid var(--line);
+           position: relative; }
+  .psec { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
+  .psec h3 { font-size: 12px; font-weight: 600; color: var(--dim); margin: 0 0 6px; display: flex; align-items: center;
+             gap: 4px; min-height: 24px; }
+  .spacer { flex: 1; }
+  .menu-btn { flex: 1; min-width: 0; justify-content: flex-start; background: none; border-color: transparent;
+              font-weight: 600; font-size: 13.5px; padding: 4px 6px; }
+  .menu-btn:hover, .menu-btn[aria-expanded=true] { background: var(--panel-2); border-color: transparent !important; }
+  .menu-btn #menu-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-btn svg { color: var(--dim); }
+  .menu { display: none; position: absolute; left: 8px; top: calc(100% - 2px); z-index: 5; min-width: 240px;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px; box-shadow: var(--shadow); }
+  .menu.open { display: block; }
+  .menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 10px; }
+  .menu button:hover { background: var(--panel-2); }
+  .menu button span { display: block; color: var(--dim); font-size: 12px; }
+  #cell-btn { width: 100%; justify-content: flex-start; gap: 7px; background: var(--field); padding: 6px 8px; }
+  #cell-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  #cell-btn svg { color: var(--dim); }
+  /* Other devices */
+  #others { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  #others .other { max-width: 100%; padding: 2px 9px; font-size: 12px; color: var(--dim); background: none;
+                   border: 1px solid var(--line); border-radius: 12px; }
+  #others .other:hover { color: var(--text); }
+  #others .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  #others .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Toolbar */
+  .toolbar { display: flex; align-items: center; gap: 6px 4px; flex-wrap: wrap; }
+  .toolbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
+  .toolbar .toolrow { flex-basis: 100%; display: flex; gap: 4px; }
+  .toolbar button { height: 28px; }
+  .toolbar button.icon { width: 28px; }
+  #save { position: relative; }
+  #save.dirty::after { content: ""; position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border-radius: 50%;
+                       background: var(--accent); }
+
+  /* Selection */
+  #sel-name { font-weight: 600; font-size: 13.5px; word-break: break-all; }
+  #sel-info { color: var(--dim); font-size: 12px; word-break: break-word; margin: 2px 0 8px; }
+  .fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 6px 0 2px; }
+  .fields label { display: flex; align-items: center; gap: 5px; background: var(--field); border: 1px solid var(--line);
+                  border-radius: var(--radius); padding: 0 0 0 6px; margin: 0; }
+  .fields label:focus-within { border-color: var(--accent); }
+  .fields label span { color: var(--dim); font-size: 11px; flex: none; }
+  .fields input { border: none; background: none; width: 100%; padding: 4px 4px 4px 0; font-variant-numeric: tabular-nums;
+                  -moz-appearance: textfield; }
+  .fields input::-webkit-inner-spin-button, .fields input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input.scrub:not(:focus) { cursor: ew-resize; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+  .pair.one { grid-template-columns: 1fr; }
+  .npc-edit-row { margin: 0 0 6px; }
+  .pair button { width: 100%; white-space: normal; line-height: 1.25; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  #door-info { color: var(--dim); font-size: 12px; margin: 8px 0 4px; overflow-wrap: anywhere; }
+  /* Messages */
+  #toast { position: fixed; left: 50%; bottom: 16px; transform: translate(-50%, 8px); z-index: 12; max-width: min(520px, 90vw);
+           background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+           border-radius: var(--radius); padding: 8px 12px; box-shadow: var(--shadow); white-space: pre-wrap;
+           opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; cursor: default; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  #toast.warn { border-left-color: var(--warn); }
+  body.docked:not(.touch):not(.panel-hidden) #toast { left: calc(50% + var(--pw) / 2); }
+  body.touch #toast { bottom: calc(var(--bar-h, 60px) + 12px); }
+
+  /* Folding sections */
+  details.fold { border-bottom: 1px solid var(--line-soft); }
+  details.fold summary { list-style: none; cursor: pointer; color: var(--dim); padding: 9px 12px; display: flex;
+                         align-items: center; gap: 6px; }
+  details.fold summary::-webkit-details-marker { display: none; }
+  details.fold summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor;
+                                 border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); margin: 0 4px 0 2px; }
+  details.fold[open] summary::before { transform: rotate(45deg); }
+  details.fold summary:hover, details.fold[open] summary { color: var(--text); }
+  details.fold > .body { padding: 0 12px 12px; }
+  label.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+  label.opt input[type=number] { width: 80px; }
+  #tiers label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+  .keys { color: var(--dim); font-size: 12px; line-height: 1.7; }
+  .keys b { color: var(--text); font-weight: 600; }
+  .note { color: var(--dim); font-size: 12px; }
+  .check { display: flex; align-items: center; gap: 8px; }
+
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+               border-radius: 50%; background: rgba(255, 255, 255, .5); pointer-events: none; display: none; }
+  #loading { position: fixed; left: 12px; bottom: 12px; color: var(--dim); background: var(--float); padding: 5px 10px;
+             border: 1px solid var(--line); border-radius: var(--radius); z-index: 1; }
+  #show-panel { position: fixed; top: 10px; left: 10px; z-index: 4; display: none; }
+  body.panel-hidden #panel { display: none; }
+  body.panel-hidden #show-panel { display: inline-flex; }
+
+  /* Windows */
+  #picker, #historybox { position: fixed; inset: 0; background: rgba(10, 10, 12, .6); display: none; z-index: 10; }
+  #picker.open, #historybox.open { display: flex; align-items: center; justify-content: center; }
+  #pk-box, #hb-box { width: min(560px, 94vw); height: min(640px, 86vh); background: var(--panel); border: 1px solid var(--line);
+            border-radius: 6px; display: flex; flex-direction: column; padding: 14px; box-sizing: border-box; gap: 8px;
+            box-shadow: var(--shadow); }
+  #hb-box { width: min(640px, 94vw); height: min(680px, 86vh); }
+  #pk-box { overflow-y: auto; }
+  #pk-title, #hb-title { font-weight: 600; font-size: 15px; }
+  #pk-search { width: 100%; box-sizing: border-box; font-size: 14px; padding: 6px 9px; }
+  #pk-list, #hb-list { flex: 1; min-width: 0; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius);
+                       background: var(--field); }
+  #pk-box.with-preview { width: min(880px, 96vw); }
+  #pk-main { flex: 1; min-height: 0; display: flex; gap: 10px; }
+  #pk-preview { display: none; width: 300px; flex-direction: column; gap: 6px; }
+  #pk-box.with-preview #pk-preview { display: flex; }
+  #pk-canvas { width: 100%; aspect-ratio: 1; border: 1px solid var(--line); border-radius: var(--radius); cursor: grab;
+               touch-action: none; display: block; background: var(--field); }
+  #pk-pv-name { font-weight: 600; overflow-wrap: anywhere; }
+  #pk-pv-id, #pk-pv-hint, #pk-count { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+  /* Short screens (a phone on its side) */
+  @media (max-height: 520px) and (min-width: 701px) {
+    #pk-box, #pk-box.with-preview { height: 96vh; padding: 8px 10px; gap: 5px; }
+    #pk-preview { width: auto; flex-direction: row; align-items: stretch; min-height: 0; }
+    #pk-canvas { width: auto; height: 100%; max-width: 32vw; aspect-ratio: 1; flex: none; }
+    #pk-pv-text { width: 150px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+    #pk-pv-hint { display: none; }
+  }
+  @media (max-width: 700px) and (max-height: 600px) {
+    #pk-canvas, #pk-pv-hint { display: none; }
+  }
+  @media (max-width: 700px) {
+    #pk-main { flex-direction: column; }
+    #pk-list { min-height: 120px; }
+    #pk-preview { width: auto; flex-direction: row; align-items: flex-start; }
+    #pk-canvas { width: 150px; flex: none; }
+    #pk-pv-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  }
+  .pk-item { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); cursor: pointer; display: flex; gap: 10px; align-items: center; }
+  .pk-item:hover, .pk-item.sel { background: var(--accent-soft); }
+  .pk-item .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pk-item .t, .pk-item .i { color: var(--dim); font-size: 11.5px; white-space: nowrap; }
+  .pk-item .star { color: var(--dim); display: inline-flex; }
+  .pk-item .star.on { color: var(--warn); }
+  .pk-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pk-row label { display: flex; align-items: center; gap: 8px; }
+  #picker details.fold { border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .hb-item { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
+  .hb-item .when { font-weight: 600; }
+  .hb-item .what { color: var(--dim); font-size: 12px; margin-top: 2px; word-break: break-word; }
+  .hb-item .acts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+
+  /* Banners and the quick menu */
+  .banner, #dest-banner { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 8; display: none;
+                 background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+                 border-radius: var(--radius); padding: 8px 12px; max-width: min(560px, 92vw); box-shadow: var(--shadow); }
+  .banner.open, #dest-banner.open { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #ctxmenu { position: fixed; z-index: 9; display: none; min-width: 190px; background: var(--panel);
+             border: 1px solid var(--line); border-radius: 6px; padding: 4px; box-shadow: var(--shadow); }
+  #ctxmenu.open { display: block; }
+  #ctxmenu .mi { padding: 6px 12px; border-radius: 3px; cursor: pointer; white-space: nowrap; max-width: 340px;
+                 overflow: hidden; text-overflow: ellipsis; }
+  #ctxmenu .mi:hover { background: var(--accent-soft); }
+  #ctxmenu .mi.off { color: var(--dim); cursor: default; background: none; font-size: 12px; }
+  #ctxmenu .mh { padding: 6px 12px 4px; color: var(--dim); font-size: 11.5px; max-width: 260px;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ctxmenu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
+  /* Fly mode */
+  /* At the top: Safari measures bottom-anchored boxes against the pre-full-screen window */
+  #look-keys { position: fixed; left: 12px; top: 12px; z-index: 6; display: none; background: var(--float);
+               border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; box-shadow: var(--shadow);
+               max-width: 340px; max-height: calc(100% - 24px); overflow: hidden; box-sizing: border-box;
+               font-size: 12px; pointer-events: none; }
+  #look-keys.open { display: block; }
+  body.mouse-look #show-panel, body.mouse-look #mouselook { display: none; }
+  #mouselook { position: fixed; top: 10px; right: 12px; z-index: 3; background: var(--float); gap: 7px; }
+  /* Actions of the selected NPC or door over the view */
+  #quick-acts { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3; display: none;
+                align-items: center; gap: 6px; padding: 4px 4px 4px 12px; background: var(--float);
+                border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow);
+                max-width: min(600px, calc(100vw - var(--pw) - 300px)); box-sizing: border-box; }
+  #quick-acts.open { display: flex; }
+  #qa-name { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: 4px; }
+  #quick-acts button { flex: none; }
+  body.docked:not(.touch):not(.panel-hidden) #quick-acts { left: calc(50% + var(--pw) / 2); }
+  body.mouse-look #quick-acts, body:has(.banner.open, #dest-banner.open) #quick-acts { display: none; }
+  #mouselook kbd { font-size: 11px; padding: 1px 4px; }
+  #look-keys .lk-title { font-weight: 600; margin-bottom: 6px; display: flex; gap: 8px; align-items: baseline; }
+  #look-keys .lk-title span { font-weight: 400; color: var(--dim); }
+  #look-keys dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; align-items: center; }
+  #look-keys dt { display: flex; gap: 2px; white-space: nowrap; color: var(--dim); }
+  #look-keys dd { margin: 0; color: var(--dim); }
+  #look-keys kbd { font-size: 11px; padding: 1px 4px; }
+
+  /* Quick guide */
+  .guide { width: min(460px, 100%); }
+  .guide ul { list-style: none; margin: 0; padding: 0; }
+  .guide li { display: grid; grid-template-columns: 128px 1fr; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+  .guide li:last-child { border-bottom: none; }
+  .guide .k { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; color: var(--dim); font-size: 12px; }
+  .guide .foot { color: var(--dim); font-size: 12px; margin-top: 10px; }
+
+  /* Touch mode (phones, tablets) */
+  #touchbar, #joystick, #flyud, .touch-only { display: none; }
+  body.touch .desktop-only { display: none !important; }
+  body.touch .touch-only { display: block; }
+  body.touch #touchbar { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 3;
+                         background: var(--panel); border-top: 1px solid var(--line);
+                         padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+  .tb-row { display: flex; gap: 6px; align-items: center; }
+  .tb-row + .tb-row { margin-top: 6px; }
+  #tb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  #tb-top { display: contents; }
+  #touchbar .tb-multi, body.multi-mode #touchbar .tb-normal, body.multi-mode #tb-nudge { display: none; }
+  body.multi-mode #touchbar .tb-multi { display: inline-flex; }
+  @media (orientation: portrait) {
+    body.touch #tb-top { display: flex; gap: 6px; align-items: center; position: fixed; top: 0; left: 0; right: 0;
+                         z-index: 3; background: var(--panel); border-bottom: 1px solid var(--line);
+                         padding: calc(6px + env(safe-area-inset-top)) 8px 6px; }
+    body.touch #tb-main > button { flex: 1 1 auto; }
+    body.touch #tb-main > button.icon { flex: 0 0 auto; }
+  }
+  body.touch .banner, body.touch #dest-banner { top: calc(var(--top-h, 0px) + 10px); }
+  @media (orientation: portrait) {
+    body.touch #tb-nudge [data-act=left], body.touch #tb-nudge [data-act=right],
+    body.touch #tb-nudge [data-act=fwd], body.touch #tb-nudge [data-act=back] { display: none; }
+  }
+  @media (orientation: landscape) {
+    html body.touch.panel-open #panel { top: 0; bottom: 0; left: 0; right: auto; width: min(340px, 46vw); height: auto;
+                                        max-height: none; border-radius: 0 8px 8px 0; border-left: none;
+                                        padding-left: env(safe-area-inset-left); }
+    html body.touch.panel-open #touchbar { display: block; left: min(340px, 46vw); }
+    html body.touch.panel-open #sheet-grip { display: none; }
+    html body.touch.panel-open #tb-name, html body.touch.panel-open #tb-full,
+    html body.touch.panel-open #tb-hide { display: none; }
+    html body.touch.panel-open #tb-main { justify-content: flex-end; }
+  }
+  #sheet-grip { display: none; }
+  .tb-pop { display: none; position: fixed; z-index: 5; flex-direction: column; gap: 4px; padding: 4px;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); }
+  .tb-pop.open { display: flex; }
+  .tb-pop button { justify-content: flex-start; min-width: 120px; }
+  body.touch.panel-open #sheet-grip { display: block; flex: none; height: 22px; touch-action: none; cursor: ns-resize;
+                                      position: sticky; top: 0; z-index: 6; background: var(--panel); }
+  #sheet-grip::after { content: ""; position: absolute; left: 50%; top: 9px; width: 40px; height: 4px;
+                       margin-left: -20px; border-radius: 2px; background: var(--line); }
+  body.touch button { padding: 8px 10px; font-size: 15px; touch-action: manipulation; }
+  body.touch svg.i { width: 18px; height: 18px; }
+  #tb-nudge button { flex: 1; padding: 10px 0; }
+  body.touch .tb-row button.icon { padding: 8px; }
+  body.touch #panel { top: auto; left: 0; right: 0; width: auto; bottom: var(--bar-h, 60px);
+                      max-height: 55vh; border-radius: 8px 8px 0 0; display: none; z-index: 2; background: var(--panel);
+                      font-size: 15px; -webkit-user-select: auto; user-select: auto; }
+  body.touch.panel-open #panel { display: flex; bottom: 0; padding-bottom: env(safe-area-inset-bottom);
+                                 height: var(--sheet-h, 55vh); max-height: calc(100% - 40px); }
+  body.touch.panel-open #touchbar { display: none; }
+  body.touch button.touch-only { display: inline-flex; }
+  body.touch .fields input { font-size: 16px; padding: 6px 4px 6px 0; }
+  body.touch select, body.touch input[type=number] { font-size: 16px; padding: 5px; }
+  body.touch #joystick { display: block; position: fixed; left: 12px; bottom: calc(var(--bar-h, 60px) + 12px);
+                         width: 140px; height: 140px; border-radius: 50%; z-index: 1; touch-action: none;
+                         background: rgba(255, 255, 255, .08); border: 2px solid rgba(255, 255, 255, .25); }
+  #stick { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px;
+           border-radius: 50%; background: rgba(91, 155, 213, .6); pointer-events: none; }
+  body.touch #flyud { display: flex; flex-direction: column; gap: 10px; position: fixed; right: 18px; z-index: 1;
+                      bottom: calc(var(--bar-h, 60px) + 18px); }
+  #flyud button { width: 58px; height: 52px; background: rgba(43, 45, 49, .85); touch-action: none; }
+  body.touch.panel-open #joystick, body.touch.panel-open #flyud { display: none; }
+  body.touch #show-panel, body.touch #hide-panel { display: none; }
+  body.touch.bar-hidden #touchbar, body.touch.bar-hidden #panel { display: none; }
+  body.touch.bar-hidden #show-panel { display: inline-flex; top: auto; bottom: calc(18px + env(safe-area-inset-bottom));
+                                      left: 50%; transform: translateX(-50%); }
+  body.touch #ctxmenu .mi { padding: 11px 14px; font-size: 16px; }
+
+  /* NPC editor */
+  #npcbox { position: fixed; inset: 0; background: rgba(10, 10, 12, .6); display: none; z-index: 10; }
+  #npcbox.open { display: flex; align-items: center; justify-content: center; }
+  #npc-box { width: min(1180px, 96vw); height: min(820px, 92vh); background: var(--panel); border: 1px solid var(--line);
+             border-radius: 6px; display: flex; flex-direction: column; box-shadow: var(--shadow); box-sizing: border-box;
+             -webkit-user-select: text; user-select: text; }
+  #npc-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #npc-top .t { font-weight: 600; font-size: 15px; }
+  #npc-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #npc-top button { flex: none; }
+  #npc-cellbox { position: fixed; inset: 0; z-index: 11; background: rgba(10, 10, 12, .45); display: none;
+                  align-items: center; justify-content: center; }
+  #npc-cellbox.open { display: flex; }
+  #npcl-box { width: min(440px, 94vw); height: min(640px, 86vh); background: var(--panel); border: 1px solid var(--line);
+              border-radius: 6px; display: flex; flex-direction: column; box-shadow: var(--shadow); box-sizing: border-box;
+              outline: none; }
+  #npcl-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #npcl-top .t { font-weight: 600; font-size: 15px; flex: none; }
+  #npcl-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #npc-list { flex: 1; overflow-y: auto; margin: 10px; border: 1px solid var(--line); border-radius: var(--radius);
+              background: var(--field); }
+  .npc-item { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); cursor: pointer; }
+  .npc-item:hover, .npc-item.sel { background: var(--accent-soft); }
+  .npc-item .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .npc-item .d { color: var(--dim); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .npc-item .mark { font-weight: 400; font-size: 11px; color: var(--accent); margin-left: 6px; }
+  .npc-group { padding: 8px 10px 4px; color: var(--dim); font-size: 12px; font-weight: 600; }
+  .npc-empty { color: var(--dim); padding: 16px; }
+  #npc-form { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 14px; box-sizing: border-box; }
+  #npc-form:focus { outline: none; }
+  .npc-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .npc-titles { flex: 1; min-width: 180px; }
+  .npc-title { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
+  .npc-sub { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+  .npc-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .npc-note, .npc-warn { border-left: 3px solid var(--warn); background: var(--panel-2); padding: 6px 10px;
+                         margin-bottom: 8px; white-space: pre-wrap; border-radius: var(--radius); }
+  .npc-warn { border-left-color: var(--bad); }
+  .npc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; align-items: start; }
+  .npc-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 12px; overflow-x: auto;
+              position: sticky; top: -12px; z-index: 1; background: var(--panel); scrollbar-width: none; }
+  .npc-tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px;
+             color: var(--dim); font-weight: 600; white-space: nowrap; flex: none; }
+  .npc-tab:hover { color: var(--text); background: none; }
+  .npc-tab.sel { color: var(--text); border-bottom-color: var(--accent); }
+  .npc-tab .short { display: none; }
+  .npc-pane { display: none; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .npc-pane.sel { display: grid; }
+  .npc-sec { border: 1px solid var(--line-soft); border-radius: 6px; padding: 10px 12px; background: var(--panel-2); min-width: 0; }
+  .npc-sec h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+  .npc-sub-h { color: var(--dim); font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+  .npc-sub-h:first-child { margin-top: 0; }
+  .npc-f { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 8px; margin: 4px 0; }
+  .npc-f span { color: var(--dim); font-size: 12px; }
+  .npc-f input, .npc-f select { width: 100%; box-sizing: border-box; }
+  .npc-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .npc-f.small { grid-template-columns: auto 72px; margin: 2px 0; }
+  .npc-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 12px; }
+  .npc-stats .npc-f { grid-template-columns: minmax(0, 1fr) 56px; margin: 1px 0; }
+  .npc-stats .npc-f span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .npc-stats.idle { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); margin-top: 4px; }
+  .npc-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+  .npc-cols.skills { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 24px; }
+  .npc-f.num { grid-template-columns: minmax(0, 1fr) 64px; margin: 3px 0; }
+  .npc-f.num span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .npc-cols.skills .npc-f.num { max-width: 250px; }
+  .npc-sec .check + .npc-hint { margin-bottom: 4px; }
+  .npc-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }
+  .npc-hint { color: var(--dim); font-size: 12px; margin-top: 4px; }
+  .npc-hint:empty { display: none; }
+  .npc-rows:empty::before { content: attr(data-empty); color: var(--dim); font-size: 12px; }
+  .npc-line, .npc-add { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+  .npc-line .count, .npc-add .count { width: 62px; flex: none; }
+  .npc-line .id { width: 170px; flex: none; }
+  .npc-add input[type=text] { flex: 1; min-width: 0; }
+  .npc-add { margin-top: 8px; }
+  .npc-line .what { flex: 1; min-width: 0; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; }
+  .npc-line .what.bad { color: var(--bad); }
+  .npc-line button.icon { padding: 2px; }
+  .dialog .npc-f { grid-template-columns: 60px 1fr; }
+  /* NPC dialogue (topics.js) */
+  .npc-sec.wide { grid-column: 1 / -1; }
+  .dlg-topic { margin: 0 0 4px; }
+  .dlg-topic.open { margin-bottom: 12px; }
+  .dlg-topic-h { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0; padding: 5px 4px; background: none;
+                 border: none; border-radius: var(--radius); text-align: left; justify-content: flex-start; cursor: pointer; }
+  .dlg-topic-h:hover { background: var(--accent-soft); }
+  .dlg-topic.open .dlg-topic-h { margin-bottom: 4px; }
+  .dlg-chev { display: inline-flex; color: var(--dim); flex: none; }
+  .dlg-chev svg { width: 14px; height: 14px; }
+  .dlg-topic-h .dlg-name, .dlg-topic-h .dlg-type { flex: none; white-space: nowrap; }
+  .dlg-peek { flex: 1; min-width: 0; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; }
+  .dlg-topic.open .dlg-peek, .dlg-topic:not(.open) .dlg-body { display: none; }
+  .dlg-tools { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
+  .dlg-tools .dlg-type { flex: 1; }
+  .dlg-name { font-weight: 600; font-size: 14px; }
+  .dlg-type { color: var(--dim); font-size: 12px; }
+  .dlg-card { border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--panel); padding: 6px 8px;
+              margin: 0 0 6px; }
+  .dlg-card.deleted { opacity: .6; }
+  .dlg-card.deleted .dlg-text-ro { text-decoration: line-through; }
+  .dlg-row { display: flex; align-items: center; gap: 4px; }
+  .dlg-n { color: var(--dim); font-size: 12px; min-width: 20px; }
+  .dlg-sum { flex: 1; min-width: 0; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
+  .dlg-row button.icon { padding: 2px; }
+  .dlg-text, .dlg-script { width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: var(--field);
+                           border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin-top: 4px;
+                           resize: vertical; }
+  .dlg-script { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  .dlg-text:focus, .dlg-script:focus { outline: none; border-color: var(--accent); }
+  .dlg-text-ro { margin-top: 4px; white-space: pre-wrap; }
+  .dlg-count { text-align: right; color: var(--dim); font-size: 11px; }
+  .dlg-count:empty { display: none; }
+  .dlg-count.bad { color: var(--bad); }
+  .dlg-more summary { cursor: pointer; color: var(--dim); font-size: 12px; margin-top: 4px; }
+  .dlg-more summary:hover { color: var(--text); }
+  .dlg-more-b { padding: 4px 0 2px; }
+  .dlg-more-b .npc-f { grid-template-columns: 110px minmax(0, 240px); }
+  .dlg-cond { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin: 3px 0; }
+  .dlg-cond select, .dlg-cond input { min-width: 0; }
+  .dlg-cond input[type=text] { width: 150px; }
+  .dlg-cond input.val { width: 64px; }
+  .dlg-add { display: flex; gap: 6px; margin: 8px 0 0; max-width: 520px; }
+  .dlg-add input { flex: 1; min-width: 0; }
+  @media (max-width: 760px) {
+    #npc-box { width: 100vw; height: 100%; border-radius: 0; border: none; }
+    #npcbox.open { align-items: stretch; }
+    #npcl-box { width: 100vw; height: 100%; border-radius: 0; border: none; }
+    #npc-cellbox.open { align-items: stretch; }
+    .npc-tab { padding: 8px 9px; }
+    .npc-tab .long { display: none; }
+    .npc-tab .short { display: inline; }
+    .npc-grid { grid-template-columns: minmax(0, 1fr); }
+    .npc-line .id { flex: 3 1 0; width: auto; min-width: 0; }
+    .npc-line .what { flex: 2 1 0; }
+    .npc-line .count, .npc-add .count { width: 50px; }
+    .dlg-cond { display: grid; grid-template-columns: minmax(0, 1fr) auto 64px auto; gap: 4px;
+                grid-template-areas: "k k k rm" "nm o val val"; }
+    .dlg-cond .k { grid-area: k; } .dlg-cond .rm { grid-area: rm; }
+    .dlg-cond .f, .dlg-cond .nm { grid-area: nm; width: auto; } .dlg-cond .o { grid-area: o; }
+    .dlg-cond .val { grid-area: val; width: auto; }
+    .dlg-more-b .npc-f { grid-template-columns: 110px minmax(0, 1fr); }
+  }
+  body.touch #npc-box input, body.touch #npc-box select { font-size: 16px; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.js",
+                 "three/addons/controls/TransformControls.js": "./vendor/three/TransformControls.js" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="crosshair"></div>
+<div id="toast" role="status" title="Click to close"></div>
+<div id="quick-acts" class="desktop-only">
+  <span id="qa-name"></span>
+  <button id="qa-npc" title="Stats, looks, inventory, spells, AI and dialogue of this NPC"><i data-icon="person"></i>Edit NPC…</button>
+  <button id="qa-go" title="Open the cell this door leads to"><i data-icon="door"></i>Go through</button>
+  <button id="qa-set" title="Pick the cell, then set where the player should arrive">Set destination…</button>
+</div>
+<button id="mouselook" class="desktop-only" title="Fly mode: look around with the mouse (Tab)"><i data-icon="crosshair"></i>Fly mode <kbd>Tab</kbd></button>
+<div id="look-keys" aria-label="Keys">
+  <div class="lk-title">Fly mode <span><kbd>Tab</kbd> to exit</span></div>
+  <dl>
+    <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Fly; <kbd>Q</kbd> down, <kbd>E</kbd> up; <kbd>Shift</kbd> faster</dd>
+    <dt>Click</dt><dd>Select object at crosshair; <kbd class="mod">Ctrl</kbd>+click to select multiple</dd>
+    <dt>Right click</dt><dd>Quick menu (add object, actions…)</dd>
+    <dt><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></dt><dd>Move object; <kbd>Shift</kbd>+<kbd>↑</kbd><kbd>↓</kbd> up / down</dd>
+    <dt><kbd>Z</kbd><kbd>X</kbd></dt><dd>Rotate</dd>
+    <dt><kbd>−</kbd><kbd>+</kbd></dt><dd>Scale</dd>
+    <dt><kbd>G</kbd></dt><dd>Drop onto the surface below</dd>
+    <dt><kbd>B</kbd></dt><dd>Attach to object below, or detach</dd>
+    <dt><kbd class="mod">Ctrl</kbd>+<kbd>G</kbd></dt><dd>Group objects; <kbd class="mod">Ctrl</kbd>+<kbd>D</kbd> duplicate</dd>
+    <dt><kbd>L</kbd></dt><dd>Lock or unlock walls &amp; floors</dd>
+    <dt><kbd>Del</kbd></dt><dd>Delete object</dd>
+    <dt><kbd class="mod">Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo; <kbd class="mod">Ctrl</kbd>+<kbd>S</kbd> to save</dd>
+  </dl>
+</div>
+<div id="loading">Loading…</div>
+<div id="panel">
+  <div id="sheet-grip" class="touch-only" title="Drag to make the panel taller or shorter"></div>
+  <div class="phead">
+    <button id="menu-btn" class="menu-btn" title="Project menu" aria-haspopup="true" aria-expanded="false">
+      <span id="menu-name">Cell Editor</span><i data-icon="chevDown"></i></button>
+    <button id="fullscreen" class="ghost icon" title="Full screen"><i data-icon="maximize"></i></button>
+    <button id="hide-panel" class="ghost icon" title="Hide the panel (P)"><i data-icon="sidebar"></i></button>
+    <button id="close-sheet" class="ghost icon touch-only" title="Close the panel"><i data-icon="chevDown"></i></button>
+    <div id="menu" class="menu" role="menu">
+      <button id="to-start" role="menuitem">Start page<span>projects</span></button>
+      <button id="to-settings" role="menuitem">Project settings<span>data files, resources, what's shown</span></button>
+      <button id="quit" role="menuitem">Quit the editor<span>it also stops when you close this tab</span></button>
+    </div>
+  </div>
+  <div class="psec">
+    <button id="cell-btn" title="Choose a cell"><i data-icon="pin"></i><span id="cell-name">…</span><i data-icon="chevDown"></i></button>
+    <div id="others" style="display:none"></div>
+  </div>
+  <div class="psec toolbar">
+    <button id="mode-move" class="icon on" title="Move (T)"><i data-icon="move"></i></button>
+    <button id="mode-turn" class="icon" title="Rotate (R)"><i data-icon="rotate"></i></button>
+    <button id="mode-scale" class="icon" title="Scale (Y): drag the handle"><i data-icon="scale"></i></button>
+    <span class="spacer"></span>
+    <button id="undo" class="icon" title="Undo (Ctrl/Cmd+Z)"><i data-icon="undo"></i></button>
+    <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i></button>
+    <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button></div>
+    <input type="checkbox" id="lock" checked hidden>
+  </div>
+  <div class="psec">
+    <h3>Selected
+      <button id="look" class="ghost icon" title="Focus selection (F)" aria-label="Focus selection" disabled><i data-icon="focus"></i></button>
+      <span class="spacer"></span>
+      <button id="obj-history" class="ghost icon" title="Earlier saved states of the selected object"><i data-icon="clock"></i></button>
+    </h3>
+    <div id="sel-name">Nothing selected</div>
+    <div id="sel-info"></div>
+    <div class="pair one npc-edit-row" id="npc-row" style="display:none"><button id="edit-npc" title="Stats, looks, inventory, spells, AI and dialogue of this NPC"><i data-icon="person"></i>Edit NPC…</button></div>
+    <div id="sel-edit" style="display:none">
+      <div class="fields">
+        <label title="East"><span>X</span><input type="number" step="1" id="px"></label>
+        <label title="North"><span>Y</span><input type="number" step="1" id="py"></label>
+        <label title="Up"><span>Z</span><input type="number" step="1" id="pz"></label>
+        <label title="Heading, clockwise from north (degrees)"><span>Head</span><input type="number" step="1" id="rz"></label>
+        <label title="Tilt around X (degrees)"><span>Tilt X</span><input type="number" step="1" id="rx"></label>
+        <label title="Tilt around Y (degrees)"><span>Tilt Y</span><input type="number" step="1" id="ry"></label>
+        <label title="0.5 to 2 (OpenMW's limits); − / + keys"><span>Scale</span><input type="number" step="0.05" min="0.5" max="2" id="sc"></label>
+      </div>
+      <div class="pair">
+        <button id="drop" title="G: drop onto the surface below">Drop onto surface</button>
+        <button id="attach" title="Attach to whatever this stands on (table, shelf, etc.), so moving that object carries this along">Attach to object below</button>
+      </div>
+      <div class="pair">
+        <button id="group" title="Cmd/Ctrl+G">Group</button>
+        <button id="duplicate" title="A copy beside it (Cmd/Ctrl+D)">Duplicate</button>
+      </div>
+      <div class="pair one"><button id="swap" title="Swap the selected object with a different model, keeping its place">Swap model…</button></div>
+      <div class="pair">
+        <button id="reset" title="Back to original values">Reset</button>
+        <button id="delete" title="Delete"><i data-icon="trash"></i>Delete</button>
+      </div>
+    </div>
+    <div id="door-row" style="display:none">
+      <div id="door-info"></div>
+      <div class="row">
+        <button id="door-go" title="Open the cell this door leads to">Go to destination</button>
+        <button id="door-set" title="Pick the cell, then set where the player should arrive">Set destination…</button>
+      </div>
+    </div>
+    <div class="pair">
+      <button id="add" title="Or right-click a surface"><i data-icon="plus"></i>Add object…</button>
+      <button id="add-npc" title="A new NPC: click where they should stand (or right-click a surface), then name them"><i data-icon="person"></i>Add NPC…</button>
+    </div>
+    <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
+  </div>
+  <details id="settings" class="fold">
+    <summary>Settings</summary>
+    <div class="body">
+      <label class="opt desktop-only">Panel <select id="dock"><option value="dock">Docked</option><option value="float">Floating</option></select></label>
+      <label class="opt">Gizmo snaps to steps <input type="checkbox" id="snap"></label>
+      <label class="opt">Fly speed <input type="number" id="fly-speed" min="10" max="10000" step="10"></label>
+      <label class="opt">Move step <select id="move-step"></select></label>
+      <label class="opt">Rotate step <select id="rot-step"></select></label>
+      <label class="opt">Look sensitivity <input type="number" id="sensitivity" min="0.1" max="20" step="0.1"></label>
+    </div>
+  </details>
+  <details id="mod-section" class="fold" style="display:none">
+    <summary id="mod-summary">Mod</summary>
+    <div class="body">
+      <div class="note" style="margin-bottom:4px">Upgrade tiers shown</div>
+      <div id="tiers"></div>
+    </div>
+  </details>
+  <details id="controls-help" class="fold">
+    <summary>Controls</summary>
+    <div class="body">
+      <div class="row" style="margin:0 0 8px"><button id="guide-btn"><i data-icon="keyboard"></i>Quick guide</button></div>
+      <div class="keys touch-only">
+        <b>Thumbstick</b> fly (where you first touch is the centre), <b>up / down</b> buttons: up / down<br>
+        <b>Drag</b> the view to look around, <b>tap</b> to select; <b>Multi</b> (bottom bar): taps select more, <b>Done</b> to move them<br>
+        <b>Add</b> (bottom bar): add an object where you tap next<br>
+        <b>Long-press</b> an object: quick menu (duplicate, delete, attach…)<br>
+        Move / rotate / scale: the buttons beside the object's name (rotate: the heading ring, and two rings to tilt)<br>
+        A door that leads somewhere: the door button beside its name goes through it<br>
+        <b>Drop</b> (under the bar): onto the surface below<br>
+        The panel: upright, drag its top edge to make it taller and tap beside it to close it; on its side, it's at the left<br>
+        Gizmo: drag an <b>arrow</b> or <b>square</b><br>
+        Bottom bar: rotate, move along the floor, up / down (hold to repeat)<br>
+        Number fields: tap to type
+      </div>
+      <div class="keys desktop-only">
+        <b>Right mouse</b> hold: look around; <b>Fly mode</b> (Tab or top right): look around with the mouse (Tab to exit)<br>
+        <b>W A S D</b> fly, <b>Q</b> down, <b>E</b> up, <b>Shift</b> faster<br>
+        <b>Left click</b> select, <b>Esc</b> deselect<br>
+        <b>Cmd/Ctrl + click</b> select multiple: move, rotate, scale and delete together<br>
+        <b>Cmd/Ctrl + G</b> group objects; <b>Alt + click</b> or <b>double-click</b> selects an individual object in the group<br>
+        <b>Right click</b> (no drag): quick menu (swap model, delete, attach, add here…)<br>
+        <b>P</b> hide / show the panel, <b>?</b> quick guide<br>
+        Gizmo: drag an <b>arrow</b> (axis) or <b>square</b> (plane); <b>T</b> move, <b>R</b> rotate (the heading ring, and two rings to tilt), <b>Y</b> scale<br>
+        Number fields: <b>drag sideways</b> (Shift ×10, Alt ×0.1), click to type<br>
+        <b>Arrows</b> move object along the floor (relative to view)<br>
+        <b>Shift + ↑ / ↓</b> or <b>PgUp / PgDn</b> move object up / down<br>
+        <b>Z / X</b> rotate, <b>1–6</b> move step<br>
+        <b>G</b> drop onto the surface below, <b>B</b> attach to object below / detach, <b>F</b> focus selection, <b>− / +</b> scale smaller / bigger<br>
+        <b>L</b> lock / unlock walls &amp; floors (locked: clicks select objects in front)<br>
+        <b>Cmd/Ctrl + D</b> duplicate (a copy beside it), <b>Delete</b> delete object, <b>Ctrl/Cmd+Z</b> undo, <b>Ctrl/Cmd+S</b> save
+      </div>
+    </div>
+  </details>
+  <div class="psec" id="phone-row" style="display:none">
+    <button id="phone" style="display:none" title="Edit on a phone, a tablet or another computer too"><i data-icon="devices"></i>Open on another device…</button>
+  </div>
+</div>
+<div id="picker">
+  <div id="pk-box">
+    <div id="pk-title">Add object</div>
+    <input id="pk-search" type="search" placeholder="Search by name or id, e.g. chair, crate, torch…" autocomplete="off">
+    <div class="pk-row">
+      <label><span id="pk-type-label">Type</span> <select id="pk-type"><option value="">All</option></select></label>
+    </div>
+    <label id="pk-attach-row" class="check" style="display:none"><input type="checkbox" id="pk-attach" checked> <span id="pk-attach-label">Attach to</span></label>
+    <label id="pk-group-row" class="check" style="display:none"><input type="checkbox" id="pk-group" checked> <span id="pk-group-label">Add to the group</span></label>
+    <details id="pk-mod" class="fold" style="display:none">
+      <summary id="pk-mod-summary">Mod options</summary>
+      <div class="body"><label class="opt">Belongs to <select id="pk-tier"></select></label></div>
+    </details>
+    <div id="pk-count"></div>
+    <div id="pk-main">
+      <div id="pk-list"></div>
+      <div id="pk-preview">
+        <canvas id="pk-canvas"></canvas>
+        <div id="pk-pv-text">
+          <div id="pk-pv-name"></div>
+          <div id="pk-pv-id"></div>
+          <div id="pk-pv-hint">Drag to rotate, scroll or pinch to zoom</div>
+          <div class="pk-row"><button id="pk-pv-use" class="primary">Add</button><button id="pk-pv-fav">Favourite</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="pk-row"><button id="pk-cancel">Cancel</button></div>
+  </div>
+</div>
+<button id="show-panel" class="icon" title="Show the panel (P)"><i data-icon="sidebar"></i></button>
+<div id="ctxmenu"></div>
+<div id="place-banner" class="banner">
+  <span id="place-text">Click where to place the object (a floor, a table, a wall).</span>
+  <button id="place-cancel">Cancel</button>
+</div>
+<div id="draft-banner" class="banner">
+  <span id="draft-text">Unsaved changes found from a previous session.</span>
+  <button id="draft-restore" class="primary">Restore changes</button>
+  <button id="draft-drop">Discard</button>
+</div>
+<div id="dest-banner">
+  <span id="dest-text">Fly to where the player should arrive, facing the direction they should face.</span>
+  <button id="dest-here" class="primary">Set arrival point here</button>
+  <button id="dest-cancel">Cancel</button>
+</div>
+<div id="historybox">
+  <div id="hb-box">
+    <div class="pk-row"><span id="hb-title">History</span><span style="flex:1"></span><button id="hb-close">Close</button></div>
+    <div id="hb-note" class="note"></div>
+    <div id="hb-list"></div>
+  </div>
+</div>
+<div id="npcbox">
+  <div id="npc-box">
+    <div id="npc-top"><span class="t">NPC</span><span id="npc-where" class="dim"></span><span class="spacer"></span>
+      <button id="npc-cell" title="The NPCs standing in this cell (and your new ones): choose one to edit">NPCs in this cell…</button>
+      <button id="npc-close">Close</button></div>
+    <div id="npc-form" tabindex="-1"></div>
+  </div>
+  <div id="npc-cellbox">
+    <div id="npcl-box" tabindex="-1">
+      <div id="npcl-top"><span class="t">NPCs in this cell</span><span id="npcl-where" class="dim"></span><span class="spacer"></span>
+        <button id="npcl-close">Close</button></div>
+      <div id="npc-list"></div>
+    </div>
+  </div>
+  <datalist id="npc-items"></datalist><datalist id="npc-spells"></datalist><datalist id="npc-scripts"></datalist>
+</div>
+<div id="tb-add-menu" class="tb-pop" role="menu">
+  <button data-add="object" role="menuitem"><i data-icon="plus"></i>Object</button>
+  <button data-add="npc" role="menuitem"><i data-icon="person"></i>NPC</button>
+</div>
+<div id="joystick"><div id="stick"></div></div>
+<div id="flyud"><button id="fly-up" title="Up"><i data-icon="chevUp"></i></button><button id="fly-down" title="Down"><i data-icon="chevDown"></i></button></div>
+<div id="touchbar">
+  <div class="tb-row" id="tb-main">
+    <div id="tb-top">
+      <!-- Object buttons on the left: a phone's camera can be at the top right -->
+      <button id="tb-door" class="icon tb-normal" title="Go through the door" style="display:none"><i data-icon="door"></i></button>
+      <button id="tb-npc" class="icon tb-normal" title="Edit this NPC" style="display:none"><i data-icon="person"></i></button>
+      <span id="tb-name">Tap an object</span>
+      <button id="tb-move" class="icon on tb-normal" title="Move"><i data-icon="move"></i></button>
+      <button id="tb-turn" class="icon tb-normal" title="Rotate"><i data-icon="rotate"></i></button>
+      <button id="tb-scale" class="icon tb-normal" title="Scale"><i data-icon="scale"></i></button>
+      <button id="tb-full" class="icon tb-normal" title="Full screen"><i data-icon="maximize"></i></button>
+    </div>
+    <button id="tb-multi" class="tb-normal" title="Select several objects: taps add them to the selection (or take them out)">Multi</button>
+    <button id="tb-add" class="tb-normal" aria-haspopup="true" aria-expanded="false">Add</button>
+    <button id="tb-undo" class="tb-normal" title="Undo">Undo</button>
+    <button id="tb-panel" class="icon tb-normal" title="The panel"><i data-icon="panelTop"></i></button>
+    <button id="tb-hide" class="icon tb-normal" title="Hide the bar"><i data-icon="chevDown"></i></button>
+    <button id="tb-save" class="primary tb-normal">Save</button>
+    <button id="tb-group" class="tb-multi" title="Group the selected objects: a tap on one then selects them all">Group</button>
+    <button id="tb-done" class="primary tb-multi" title="Leave multi-select (the objects stay selected)">Done</button>
+  </div>
+  <div class="tb-row" id="tb-nudge" style="display:none">
+    <button data-act="turn-" title="Rotate left"><i data-icon="turnLeft"></i></button><button data-act="left" title="Left"><i data-icon="left"></i></button>
+    <button data-act="fwd" title="Away"><i data-icon="up"></i></button><button data-act="back" title="Nearer"><i data-icon="down"></i></button>
+    <button data-act="right" title="Right"><i data-icon="right"></i></button><button data-act="turn+" title="Rotate right"><i data-icon="turnRight"></i></button>
+    <button data-act="up" title="Up"><i data-icon="upToLine"></i></button><button data-act="down" title="Down"><i data-icon="downToLine"></i></button>
+    <button id="tb-drop" title="Drop onto the surface below">Drop</button>
+  </div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

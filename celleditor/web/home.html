@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cell Editor</title>
+<link rel="icon" href="favicon.png" sizes="32x32">
+<link rel="icon" href="icon-small.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="theme.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 12px 0 16px; flex: none;
+            background: var(--panel-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .logo { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; }
+  .logo-mark { width: 22px; height: 22px; }
+  .spacer { flex: 1; }
+  main { width: 100%; max-width: 820px; margin: 0 auto; padding: 26px 24px 40px; box-sizing: border-box; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; }
+  h2 { font-size: 13px; font-weight: 600; margin: 22px 0 8px; }
+  .pagehead { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .pagehead h1 { flex: 1; }
+  .lead { color: var(--dim); margin: 4px 0 18px; overflow-wrap: anywhere; }
+  .back { margin: 0 0 10px -8px; }
+  section[data-screen] { display: none; }
+  section[data-screen].on { display: block; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .dim { font-size: 12.5px; overflow-wrap: anywhere; }
+  input[type=text] { padding: 6px 9px; width: 100%; box-sizing: border-box; }
+
+  /* Projects */
+  .projects { border-top: 1px solid var(--line); }
+  .proj { display: flex; gap: 14px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--line-soft);
+          cursor: pointer; }
+  .proj:hover { background: var(--panel-2); }
+  .thumb { width: 112px; height: 70px; flex: none; border-radius: var(--radius); background: var(--field) center/cover;
+           border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--dim); }
+  .proj .what { flex: 1; min-width: 0; }
+  .proj .title { font-size: 14.5px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .tag { font-size: 11.5px; font-weight: 500; color: var(--dim); }
+  .tag.open { color: var(--accent); }
+  .meta { color: var(--dim); margin-top: 3px; overflow-wrap: anywhere; }
+  .meta b { color: var(--text); font-weight: 500; }
+  .proj .go { opacity: 0; }
+  .proj:hover .go, .proj .go:focus-visible { opacity: 1; }
+  .proj .hint { color: var(--dim); font-size: 12.5px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .proj .hint .i { width: 14px; height: 14px; }
+  .empty-note { color: var(--dim); padding: 18px 6px; border-bottom: 1px solid var(--line-soft); }
+
+  /* Forms */
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 16px 0 6px; }
+  .seg button { border: none; border-radius: 0; background: var(--panel-2); color: var(--dim); padding: 7px 16px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { color: var(--text); background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+  .form { margin-top: 10px; border-top: 1px solid var(--line); }
+  .frow { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; padding: 14px 0;
+          border-bottom: 1px solid var(--line-soft); }
+  .flabel { color: var(--dim); padding-top: 5px; }
+  .field { display: flex; gap: 8px; align-items: center; }
+  .path { flex: 1; min-width: 0; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 5px 9px; overflow-wrap: anywhere; }
+  .path.none { color: var(--dim); }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
+  .hint.good { color: var(--good); }
+  .hint:empty { display: none; }
+  .bar { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 18px; }
+  .bar .dim { flex: 1; }
+  @media (max-width: 600px) {
+    main { padding: 18px 16px 32px; }
+    .topbar { padding: 0 6px 0 12px; gap: 4px; }
+    .logo span { display: none; }
+    .frow { grid-template-columns: 1fr; gap: 6px; }
+    .flabel { padding-top: 0; }
+    .thumb { width: 84px; height: 54px; }
+  }
+
+  /* Content files and folders */
+  .plugins { background: var(--field); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .plugins.empty { min-height: 34px; }
+  .plugin { display: flex; gap: 10px; align-items: center; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--line-soft); }
+  .plugin:last-child { border-bottom: none; }
+  .plugin .what { flex: 1; min-width: 0; }
+  .plugin b { font-weight: 500; }
+  .plugin .dim { font-size: 12px; }
+  .plugin .tools { display: flex; gap: 2px; flex: none; }
+  .plugin.pick { cursor: pointer; }
+  .plugin.pick:hover { background: var(--panel-2); }
+  .check { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+  .check input { width: 16px; height: 16px; margin: 0; flex: none; }
+  .missing { color: var(--bad); font-size: 12.5px; margin-top: 8px; }
+  .saved { color: var(--dim); font-size: 12px; }
+
+  /* Notes and confirmations */
+  .blocked { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--warn);
+             border-radius: var(--radius); padding: 12px 14px; margin: 14px 0; }
+  .blocked p { margin: 6px 0; }
+
+  /* File and folder chooser */
+  .places { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .files { background: var(--field); border: 1px solid var(--line); border-radius: var(--radius); max-height: 48vh;
+           overflow: auto; margin-top: 10px; }
+  .files > button { display: flex; width: 100%; justify-content: flex-start; text-align: left; border: none;
+                    border-bottom: 1px solid var(--line-soft); border-radius: 0; background: none; padding: 7px 10px; }
+  .files > button:hover { background: var(--panel-2); }
+  .files .file { color: var(--accent); }
+  .files .empty { padding: 12px; color: var(--dim); }
+  .files .blocked { margin: 10px; }
+
+  #error:not(:empty) { position: sticky; bottom: 12px; background: var(--panel); border: 1px solid var(--line);
+                       border-left: 3px solid var(--bad); border-radius: var(--radius); padding: 10px 12px; margin-top: 16px;
+                       color: var(--bad); white-space: pre-line; box-shadow: var(--shadow); }
+  #wait:not(:empty) { margin-top: 12px; color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo"><i data-icon="logo"></i><span>OpenMW Cell Editor</span></div>
+  <span class="spacer"></span>
+  <button class="ghost" id="quit" title="Stop the editor (it also stops when you close its last tab)">Quit</button>
+</header>
+<main>
+  <!-- Projects -->
+  <section data-screen="projects">
+    <div class="pagehead">
+      <h1>Projects</h1>
+      <button id="open-project"><i data-icon="folder"></i>Open project file…</button>
+      <button id="new-project" class="primary"><i data-icon="plus"></i>New project</button>
+    </div>
+    <div id="project-list" class="projects"></div>
+  </section>
+
+  <!-- New project -->
+  <section data-screen="new">
+    <button class="ghost back" data-back="projects"><i data-icon="chevLeft"></i>Projects</button>
+    <h1>New project</h1>
+    <div class="seg"><button data-mode="new">Make a new content file</button><button data-mode="edit">Edit a content file</button></div>
+    <div class="form">
+      <div id="n-new">
+        <div class="frow"><div class="flabel">Name</div>
+          <div><input type="text" id="n-name" placeholder="e.g. MyHouse" autocomplete="off">
+            <div class="hint" id="n-file"></div></div></div>
+        <div class="frow"><div class="flabel">Save location</div>
+          <div><div class="field"><div class="path" id="n-folder">Not selected yet</div>
+            <button id="n-folder-pick">Browse…</button></div>
+            <div class="hint">To play it, the folder must be in OpenMW's data folders, and the file enabled in OpenMW's launcher, under Data Files › Content Files.</div></div></div>
+      </div>
+      <div id="n-edit">
+        <div class="frow"><div class="flabel">Content file</div>
+          <div><div class="path" id="n-plugin">Not selected yet</div>
+            <div class="row"><button id="n-plugin-pick">Browse…</button>
+              <button class="openmw-only" id="n-plugin-openmw">From OpenMW's load order…</button></div>
+            <div id="n-needs" class="hint"></div>
+            <div id="n-missing"></div></div></div>
+      </div>
+      <div class="frow"><div class="flabel">Data Files</div>
+        <div><div class="field"><div class="path" id="n-data">Not selected yet</div>
+          <button id="n-data-pick">Change…</button></div>
+          <div class="hint" id="n-data-status"></div></div></div>
+      <div class="frow" id="n-mods"></div>
+    </div>
+    <div class="bar"><button data-back="projects">Cancel</button>
+      <button id="n-create" class="primary">Create and start editing</button></div>
+  </section>
+
+  <!-- Project settings -->
+  <section data-screen="project">
+    <button class="ghost back" data-back="projects"><i data-icon="chevLeft"></i>Projects</button>
+    <h1 id="p-name"></h1>
+    <p class="lead" id="p-what"></p>
+    <div id="p-blocked"></div>
+    <div id="p-own" class="form">
+      <div class="frow"><div class="flabel">Data Files</div>
+        <div><div class="field"><div class="path" id="p-data"></div>
+          <button id="p-data-change">Change…</button></div>
+          <div class="hint" id="p-game"></div></div></div>
+      <div class="frow" id="p-mods"></div>
+    </div>
+    <div class="row"><span class="saved" id="p-saved"></span></div>
+    <div id="p-cfg" class="lead">This project uses OpenMW's settings (openmw.cfg) for the game's files and content files.</div>
+    <div id="p-confirm" class="blocked" style="display:none">
+      <b id="p-confirm-title"></b>
+      <p id="p-confirm-text"></p>
+      <div class="row"><button id="p-confirm-yes" class="primary"></button><button id="p-confirm-no">Cancel</button></div>
+    </div>
+    <div class="bar"><button class="link" id="p-forget"></button><span class="dim" id="p-forget-note"></span><span style="flex:1"></span>
+      <button id="p-start" class="primary">Start editing</button></div>
+  </section>
+
+  <!-- OpenMW's load order -->
+  <section data-screen="openmw">
+    <h1 id="o-title">Add from OpenMW's settings</h1>
+    <p class="lead" id="o-lead">Select what to add.</p>
+    <div id="o-blocked"></div>
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Content files</h2>
+      <button class="link" id="o-all">Select all</button></div>
+    <div id="o-list" class="plugins" style="margin-top:8px"></div>
+    <div id="o-folders-part">
+      <h2>Meshes and textures</h2>
+      <p class="dim" style="margin-top:0">Data folders with no content file in them.</p>
+      <div id="o-folders" class="plugins"></div>
+    </div>
+    <div class="bar"><button id="o-cancel">Cancel</button><button id="o-add" class="primary">Add selected</button></div>
+  </section>
+
+  <!-- File and folder chooser -->
+  <section data-screen="browse">
+    <h1 id="b-title">Choose</h1>
+    <p class="lead" id="b-lead"></p>
+    <div class="places" id="b-places"></div>
+    <div class="row"><input type="text" id="b-path" autocomplete="off" spellcheck="false" style="flex:1"><button id="b-go">Go</button>
+      <button id="b-system" style="display:none"></button></div>
+    <div id="b-hidden" class="dim" style="margin-top:8px"></div>
+    <div class="files" id="b-list"></div>
+    <div class="row" id="b-openmw-row"><button class="link" id="b-openmw">Or select from OpenMW's settings…</button></div>
+    <div class="bar"><span class="dim" id="b-note"></span><button id="b-cancel">Cancel</button>
+      <button id="b-choose" class="primary">Use this folder</button></div>
+  </section>
+
+  <div id="wait"></div>
+  <div id="error"></div>
+</main>
+<script type="module">
+import { keepAlive, showStopped } from './alive.js';
+import { icon, fillIcons } from './icons.js';
+import { showPhone } from './phone.js';
+
+fillIcons();
+
+const $ = (id) => document.getElementById(id);
+let home = null, quitting = false;
+const LAUNCHER = new URLSearchParams(location.search).has('launcher');
+if (LAUNCHER) $('quit').title = 'Stop the editor (it also stops when you close this window)';
+
+async function toEditor(switched) {
+  if (!LAUNCHER) { location.href = '/'; return; }
+  const out = await post('/api/launcher/editor', { switched });
+  await load();
+  go('projects');
+  $('wait').textContent = out.opened ? 'The editor opened in your browser.'
+    : 'The editor in your browser switched to it.';
+  setTimeout(() => { $('wait').textContent = ''; }, 5000);
+}
+async function onPhone(p) {
+  error(null);
+  try {
+    if (!p.open) { await post('/api/home/open', { path: p.path }); await load(); }
+  } catch (e) { error(e); return; }
+  showPhone({ title: `Open ${p.name} on another device`, extra: ['Also open here', () => toEditor(false)] });
+}
+window.launcherShow = (screen, path) => (screen === 'project' && path ? openPage(path) : go('projects'));
+
+// A request may wait long: macOS asks permission the first time a folder like Documents is read
+async function post(url, body = {}) {
+  const slow = setTimeout(() => {
+    $('wait').textContent = 'Waiting… If your computer asks for permission to open a folder, please allow it.';
+  }, 1500);
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await r.json();
+    if (!out.ok) throw new Error(out.message || 'Something went wrong.');
+    return out;
+  } finally {
+    clearTimeout(slow);
+    $('wait').textContent = '';
+  }
+}
+function error(e) { $('error').textContent = e ? e.message || String(e) : ''; }
+const short = (p) => (p && home.homeDir && p.startsWith(home.homeDir) ? '~' + p.slice(home.homeDir.length) : p || '');
+const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+const OFFICIAL = ['morrowind.esm', 'tribunal.esm', 'bloodmoon.esm'];
+const isOfficial = (p) => OFFICIAL.includes(p.name.toLowerCase());
+
+// --- Screens (the address's #part, so the browser's Back button works) -------------------------
+
+function show(screen) {
+  error(null);
+  if (!document.querySelector(`[data-screen="${screen}"]`)) screen = 'projects';
+  if ((screen === 'browse' && !browsing) || (screen === 'project' && !page) || (screen === 'openmw' && !openmwDone)) {
+    screen = 'projects';
+  }
+  document.querySelectorAll('section[data-screen]').forEach((s) => s.classList.toggle('on', s.dataset.screen === screen));
+  if (screen === 'new') renderNew();
+  if (screen === 'project') renderPage();
+  window.scrollTo(0, 0);
+}
+function go(screen) { if (location.hash.slice(1) === screen) show(screen); else location.hash = screen; }
+window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'projects'));
+document.querySelectorAll('[data-back]').forEach((b) => b.addEventListener('click', () => go(b.dataset.back)));
+
+function blockedNote(text, into) {
+  const d = el('div', 'blocked');
+  d.appendChild(el('b', '', text));
+  if (home.platform === 'darwin') {
+    d.appendChild(el('p', '', 'Allow it in System Settings › Privacy & Security › Files and Folders, then restart the editor.'));
+    const row = el('div', 'row');
+    const open = el('button', 'primary', 'Open System Settings');
+    open.addEventListener('click', () => post('/api/home/privacy').catch(error));
+    const again = el('button', '', 'Restart the editor');
+    again.addEventListener('click', () => restartEditor(again));
+    row.append(open, again);
+    d.appendChild(row);
+  } else {
+    d.appendChild(el('p', '', 'Check that your user account may open it.'));
+  }
+  into.innerHTML = '';
+  into.appendChild(d);
+}
+
+async function restartEditor(button) {
+  saveWizard();
+  quitting = true;
+  try { await post('/api/home/restart'); } catch (e) { error(e); return; }
+  button.disabled = true;
+  button.textContent = 'Restarting…';
+  await new Promise((ok) => setTimeout(ok, 1500));
+  for (let i = 0; i < 40; i++) {
+    try { if ((await fetch('/api/ping', { cache: 'no-store' })).ok) { location.reload(); return; } } catch (err) {}
+    await new Promise((ok) => setTimeout(ok, 500));
+  }
+  error(new Error("The editor did not restart automatically. Please relaunch it manually."));
+}
+
+// --- Projects ------------------------------------------------------------------------------------
+
+async function startEditing(path) {
+  error(null);
+  try {
+    await post('/api/home/open', { path });
+    await toEditor(true);
+  } catch (e) {
+    await openPage(path);
+    error(e);
+  }
+}
+
+function ago(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} minute${m > 1 ? 's' : ''} ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hour${h > 1 ? 's' : ''} ago`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'yesterday' : d < 30 ? `${d} days ago` : new Date(ms).toLocaleDateString();
+}
+
+const TAGS = { 'in place': 'Edits a content file', new: 'New content file', generator: 'Built by a script' };
+
+function renderProjects() {
+  const list = $('project-list');
+  list.innerHTML = '';
+  if (!home.projects.length) {
+    list.appendChild(el('div', 'empty-note', 'No projects yet. A project edits a content file, or makes a new one.'));
+  }
+  for (const p of home.projects) {
+    const row = el('div', 'proj');
+    row.title = LAUNCHER ? 'Open in your browser' : p.open ? 'Back to editing' : 'Open in the editor';
+    row.addEventListener('click', () => (p.open ? toEditor(false) : startEditing(p.path)));
+    const thumb = el('div', 'thumb');
+    if (p.thumb) thumb.style.backgroundImage = `url("${p.thumb}")`;
+    else thumb.innerHTML = icon('cube');
+    const what = el('div', 'what');
+    const title = el('div', 'title', p.name);
+    if (p.kind) title.appendChild(el('span', 'tag', TAGS[p.kind] || ''));
+    if (p.open) title.appendChild(el('span', 'tag open', 'open now'));
+    const meta = el('div', 'meta');
+    if (p.plugin) meta.appendChild(el('b', '', p.plugin));
+    const rest = [p.cell, p.savedAt ? `saved ${ago(p.savedAt)}` : '', p.plugin ? '' : short(p.path)].filter(Boolean);
+    meta.append((p.plugin && rest.length ? ' · ' : '') + rest.join(' · '));
+    what.append(title, meta);
+    const settings = el('button', 'ghost icon go');
+    settings.innerHTML = icon('sliders');
+    settings.title = 'Project settings';
+    settings.addEventListener('click', (e) => { e.stopPropagation(); openPage(p.path); });
+    const tail = [];
+    if (LAUNCHER) {
+      const hint = el('span', 'hint go', 'Open in browser');
+      hint.insertAdjacentHTML('beforeend', icon('external'));
+      const phone = el('button', 'ghost icon go');
+      phone.innerHTML = icon('phone');
+      phone.title = 'Open on a phone or tablet';
+      phone.addEventListener('click', (e) => { e.stopPropagation(); onPhone(p); });
+      tail.push(hint, phone);
+    }
+    row.append(thumb, what, ...tail, settings);
+    list.appendChild(row);
+  }
+}
+
+async function load() {
+  home = await (await fetch('/api/home')).json();
+  document.querySelectorAll('.openmw-only').forEach((b) => { b.style.display = home.cfg ? '' : 'none'; });
+  renderProjects();
+  restoreWizard();
+  const shown = sessionStorage.getItem('ce-page');
+  if (location.hash === '#project' && shown) { await openPage(shown); return; }
+  show(location.hash.slice(1) || 'projects');
+}
+
+// --- Resources: the content files and folders a project uses ---------------------------------------
+
+async function addPlugin(list, info, dataFiles, target = null, folders = []) {
+  const r = await post('/api/home/resolve', { path: info.path, have: list.map((p) => p.path), dataFiles,
+                                              folders: folders.map((f) => f.path || f) });
+  for (const p of r.add) {
+    if (list.some((q) => same(q.path, p.path))) continue;
+    const at = target && !same(p.path, target) ? list.findIndex((q) => same(q.path, target)) : -1;
+    list.splice(at >= 0 ? at : list.length, 0, p);
+  }
+  return r.missing;
+}
+
+function renderResources(into, setup, changed) {
+  into.innerHTML = '';
+  const others = othersOf(setup);
+  const box = el('div', others.length || setup.folders.length ? 'plugins' : 'plugins empty');
+  const row = (name, note, bad, tools) => {
+    const r = el('div', 'plugin');
+    const what = el('div', 'what');
+    what.appendChild(el('b', '', name));
+    what.appendChild(el('div', bad ? 'dim bad' : 'dim', note));
+    const t = el('div', 'tools');
+    for (const [name, title, fn, off] of tools) {
+      const b = el('button', 'ghost icon');
+      b.innerHTML = icon(name);
+      b.title = title;
+      b.disabled = off;
+      b.addEventListener('click', () => { fn(); changed(); });
+      t.appendChild(b);
+    }
+    r.append(what, t);
+    box.appendChild(r);
+  };
+  others.forEach((p, k) => {
+    const i = setup.list.indexOf(p);
+    const missing = p.masters.filter((m) => !setup.list.slice(0, i).some((q) => same(q.name, m)));
+    const note = [p.missing || '', short(p.folder), missing.length ? `needs ${missing.join(', ')} earlier in load order` : '']
+      .filter(Boolean).join(' · ');
+    const swap = (other) => { const a = setup.list.indexOf(other); [setup.list[a], setup.list[i]] = [setup.list[i], setup.list[a]]; };
+    row(p.name, note, missing.length || p.missing, [
+      ['up', 'Move earlier in load order', () => swap(others[k - 1]), k === 0],
+      ['down', 'Move later in load order', () => swap(others[k + 1]), k === others.length - 1],
+      ['x', 'Remove', () => setup.list.splice(i, 1), false]]);
+  });
+  setup.folders.forEach((f, i) => {
+    const note = ['meshes and textures', f.missing || '', short(f.path)].filter(Boolean).join(' · ');
+    row(f.name, note, !!f.missing, [['x', 'Remove', () => setup.folders.splice(i, 1), false]]);
+  });
+  into.appendChild(box);
+}
+
+const targetOf = (setup) => (setup === wiz && wiz.mode !== 'edit' ? null : setup.target);
+
+function requiredOf(setup) {
+  const out = new Set();
+  const target = targetOf(setup);
+  if (!target) return out;
+  const byName = new Map(setup.list.map((p) => [p.name.toLowerCase(), p]));
+  const walk = (p) => {
+    for (const m of (p && p.masters) || []) {
+      const k = m.toLowerCase();
+      if (!out.has(k) && !OFFICIAL.includes(k)) { out.add(k); walk(byName.get(k)); }
+    }
+  };
+  walk(setup.list.find((p) => same(p.path, target)) || setup.plugin);
+  return out;
+}
+
+function othersOf(setup) {
+  const req = requiredOf(setup), target = targetOf(setup);
+  return setup.list.filter((p) => !isOfficial(p) && !(target && same(p.path, target)) && !req.has(p.name.toLowerCase()));
+}
+
+function payload(setup) {
+  return { baseOrder: 'game', standalone: false, loadOrder: setup.list.map((p) => p.path),
+           folders: setup.folders.map((f) => f.path) };
+}
+
+function renderMods(into, setup, back, changed) {
+  into.innerHTML = '';
+  into.appendChild(el('div', 'flabel', 'Other mods'));
+  const box = el('div');
+  const list = el('div');
+  renderResources(list, setup, changed);
+  const row = el('div', 'row');
+  row.style.marginTop = '8px';
+  const file = el('button', '', 'Add mod…');
+  file.addEventListener('click', () => addResource(setup, back, changed));
+  row.appendChild(file);
+  if (home.cfg) {
+    const fromCfg = el('button', '', "From OpenMW's load order…");
+    fromCfg.addEventListener('click', () => pickFromOpenMW(setup, back, changed));
+    row.appendChild(fromCfg);
+  }
+  box.append(list, row, el('div', 'hint', 'Additional content files (.esp, .esm, .omwaddon) or asset folders to use. '
+    + 'Any mods whose objects you place will become required masters.'));
+  into.appendChild(box);
+}
+
+// --- A project's page (its settings) ---------------------------------------------------------------
+
+let page = null;
+
+async function openPage(path) {
+  error(null);
+  let p;
+  try { p = await post('/api/home/project', { path }); } catch (e) { error(e); return; }
+  page = Object.assign(p, { list: p.plugins.slice(), folders: p.folderList.slice(),
+                            target: p.kind === 'in place' ? p.pluginPath : null });
+  try { sessionStorage.setItem('ce-page', path); } catch (err) {}
+  go('project');
+  renderPage();
+}
+
+function renderPage() {
+  if (!page) return;
+  $('p-name').textContent = page.name;
+  $('p-what').textContent = page.kind === 'in place' ? `Edits ${short(page.pluginPath)}`
+    : page.kind === 'generator' ? `Built by a script: ${page.plugin}` : `Creates ${short(page.pluginPath)}`;
+  if (page.blocked.length) blockedNote(page.blockedText, $('p-blocked')); else $('p-blocked').innerHTML = '';
+  $('p-own').style.display = page.own ? '' : 'none';
+  $('p-cfg').style.display = page.own ? 'none' : '';
+  $('p-cfg').textContent = page.kind === 'generator'
+    ? "Its game files come from OpenMW's settings (openmw.cfg), and the script decides which content files it uses."
+    : "This project uses OpenMW's settings (openmw.cfg) for the game's files and content files.";
+  if (page.own) {
+    $('p-data').textContent = short(page.dataFiles);
+    $('p-game').textContent = `Found ${page.list.filter(isOfficial).map((p) => p.name).join(', ')}.`;
+    $('p-game').className = 'hint good';
+    renderMods($('p-mods'), page, 'project', savePage);
+  }
+  $('p-forget').textContent = page.deletable ? 'Delete project…' : 'Remove from the list';
+  $('p-forget-note').textContent = page.deletable ? ''
+    : "(its files are in your mod's folder, so the editor doesn't delete them)";
+  $('p-confirm').style.display = 'none';
+  $('p-start').disabled = !!page.blocked.length;
+  $('p-start').textContent = page.open ? 'Back to editing' : 'Start editing';
+}
+
+async function savePage() {
+  renderPage();
+  $('p-saved').textContent = 'Saving…';
+  try {
+    const p = await post('/api/home/save-project', Object.assign({ path: page.path, dataFiles: page.dataFiles }, payload(page)));
+    Object.assign(page, p, { list: p.plugins.slice(), folders: p.folderList.slice() });
+    renderPage();
+    $('p-saved').textContent = 'Saved.';
+  } catch (e) {
+    $('p-saved').textContent = '';
+    error(e);
+  }
+}
+
+$('p-start').addEventListener('click', () => (page.open ? toEditor(false) : startEditing(page.path)));
+$('p-forget').addEventListener('click', () => {
+  const file = short(page.pluginPath);
+  $('p-confirm-title').textContent = page.deletable ? `Delete the project ${page.name}?` : `Remove ${page.name} from the list?`;
+  $('p-confirm-text').textContent = page.deletable
+    ? `This deletes the Cell Editor project: its saved versions, backups and notes. The content file isn't `
+      + `deleted: ${file} stays where it is, as it was last saved.`
+    : `Its files stay where they are (${short(page.path)} and ${file}); it can be reopened with "Open project file…".`;
+  $('p-confirm-yes').textContent = page.deletable ? 'Delete the project' : 'Remove from the list';
+  $('p-confirm').style.display = '';
+  $('p-confirm').scrollIntoView({ block: 'nearest' });
+});
+$('p-confirm-no').addEventListener('click', () => { $('p-confirm').style.display = 'none'; });
+$('p-confirm-yes').addEventListener('click', async () => {
+  try {
+    await post(page.deletable ? '/api/home/delete' : '/api/home/forget', { path: page.path });
+    $('p-confirm').style.display = 'none';
+    page = null;
+    sessionStorage.removeItem('ce-page');
+    await load();
+    go('projects');
+  } catch (e) { error(e); }
+});
+$('p-data-change').addEventListener('click', () => pick('data', page.dataFiles, async (info) => {
+  page.dataFiles = info.path;
+  go('project');
+  await savePage();
+}));
+
+let resSetup = null, resBack = null, resChanged = null;
+function addResource(setup, back, changed) {
+  resSetup = setup;
+  resBack = back;
+  resChanged = changed;
+  pick('resource', setup.dataFiles, async (info) => {
+    if (info.assets) {
+      if (!setup.folders.some((x) => same(x.path, info.path))) setup.folders.push(info);
+    } else {
+      await addPlugin(setup.list, info, setup.dataFiles, setup.target, setup.folders);
+    }
+    go(back);
+    await changed();
+  });
+}
+
+let openmwDone = null;
+async function pickFromOpenMW(setup, back, changed, one = null) {
+  error(null);
+  let o;
+  try { o = await post('/api/home/openmw'); } catch (e) { error(e); return; }
+  $('o-title').textContent = one ? 'Select the content file to edit' : "Add from OpenMW's load order";
+  $('o-lead').textContent = one ? `The content files in OpenMW's load order (${short(o.cfg)}).`
+    : `From OpenMW's settings (${short(o.cfg)}). Select what to add.`;
+  if (o.denied.length) blockedNote(o.deniedText, $('o-blocked')); else $('o-blocked').innerHTML = '';
+  const boxes = [];
+  const fill = (into, items, has, note) => {
+    into.innerHTML = '';
+    for (const item of items) {
+      const row = el(one ? 'div' : 'label', one ? 'plugin pick' : 'plugin check');
+      const inList = !one && has(item);
+      const what = el('div', 'what');
+      what.appendChild(el('b', '', item.name));
+      what.appendChild(el('div', 'dim', inList ? 'already included' : note(item)));
+      if (one) {
+        if (item.path && !isOfficial(item)) row.addEventListener('click', () => one(item));
+        else row.style.opacity = '.5';
+        row.appendChild(what);
+      } else {
+        const cb = el('input');
+        cb.type = 'checkbox';
+        cb.checked = inList;
+        cb.disabled = inList || !item.path;
+        row.append(cb, what);
+        boxes.push({ cb, item, inList, folder: into === $('o-folders') });
+      }
+      into.appendChild(row);
+    }
+    if (!items.length) into.appendChild(el('div', 'plugin dim', 'None.'));
+  };
+  fill($('o-list'), one ? o.plugins.filter((p) => !isOfficial(p)) : o.plugins, (p) => setup.list.some((q) => same(q.name, p.name)),
+       (p) => (p.path ? short(p.folder) : p.denied ? 'in a folder the editor may not read' : 'not found in its data folders'));
+  const onlyAssets = one ? [] : o.folders.filter((d) => !same(d.path, setup.dataFiles));
+  $('o-folders-part').style.display = onlyAssets.length ? '' : 'none';
+  fill($('o-folders'), onlyAssets, (d) => setup.folders.some((f) => same(f.path, d.path)), (d) => short(d.path));
+  $('o-add').style.display = one ? 'none' : '';
+  $('o-add').textContent = 'Add selected';
+  const free = boxes.filter((b) => !b.cb.disabled);
+  $('o-all').style.display = one || !free.length ? 'none' : '';
+  $('o-all').onclick = () => {
+    const on = !free.every((b) => b.cb.checked);
+    for (const b of free) b.cb.checked = on;
+  };
+  openmwDone = async () => {
+    for (const { cb, item, inList, folder } of boxes) {
+      if (!cb.checked || inList) continue;
+      if (folder) setup.folders.push(await post('/api/home/folder', { path: item.path }));
+      else await addPlugin(setup.list, item, setup.dataFiles, setup.target, setup.folders);
+    }
+    go(back);
+    await changed();
+  };
+  $('o-cancel').onclick = () => go(back);
+  go('openmw');
+}
+$('o-add').addEventListener('click', () => openmwDone && openmwDone().catch(error));
+
+// --- New project (one screen) --------------------------------------------------------------------
+
+const EMPTY = () => ({ mode: 'new', dataFiles: null, official: [], plugin: null, newName: '', newFolder: '', list: [],
+                       folders: [], target: null, missing: [], baseOrder: 'game', standalone: false, openmwCount: 0 });
+let wiz = EMPTY();
+function saveWizard() { try { sessionStorage.setItem('ce-wizard', JSON.stringify(wiz)); } catch (err) {} }
+function restoreWizard() {
+  try { const w = JSON.parse(sessionStorage.getItem('ce-wizard') || 'null'); if (w) wiz = Object.assign(EMPTY(), w); } catch (err) {}
+}
+const ready = () => !!wiz.dataFiles && (wiz.mode === 'edit' ? !!wiz.plugin && !wiz.missing.length
+  : !!wiz.newName.trim() && !!wiz.newFolder);
+
+$('new-project').addEventListener('click', async () => {
+  wiz = EMPTY();
+  go('new');
+  try {
+    const d = await post('/api/home/defaults');
+    wiz.newFolder = d.saveFolder || '';
+    wiz.openmwCount = d.openmwCount;
+    if (d.dataFiles) await useData(d.dataFiles, true);
+  } catch (e) { error(e); }
+  saveWizard();
+  renderNew();
+});
+
+async function useData(folder, quiet = false) {
+  try {
+    const info = await post('/api/home/data', { folder });
+    wiz.dataFiles = info.path;
+    wiz.official = info.official;
+    wiz.list = info.official.concat(wiz.list.filter((p) => !info.official.some((o) => same(o.name, p.name))));
+  } catch (e) {
+    wiz.dataFiles = null;
+    if (!quiet) error(e);
+  }
+  saveWizard();
+  renderNew();
+}
+
+function renderNew() {
+  document.querySelectorAll('.seg [data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === wiz.mode));
+  $('n-new').style.display = wiz.mode === 'new' ? '' : 'none';
+  $('n-edit').style.display = wiz.mode === 'edit' ? '' : 'none';
+  if (document.activeElement !== $('n-name')) $('n-name').value = wiz.newName;
+  $('n-file').textContent = wiz.newName.trim() ? `Saved as ${wiz.newName.trim()}.omwaddon` : '';
+  const path = (id, value) => {
+    $(id).textContent = value ? short(value) : 'Not selected yet';
+    $(id).classList.toggle('none', !value);
+  };
+  path('n-folder', wiz.newFolder);
+  path('n-plugin', wiz.plugin && wiz.plugin.path);
+  const miss = $('n-missing');
+  miss.innerHTML = '';
+  if (wiz.mode === 'edit' && wiz.missing.length) {
+    miss.appendChild(el('div', 'missing', `Missing required master(s): ${wiz.missing.join(', ')}. Please locate them to continue.`));
+    const find = el('button', '', 'Browse…');
+    find.addEventListener('click', () => pick('plugin', wiz.dataFiles, async (info) => {
+      await addPlugin(wiz.list, info, wiz.dataFiles, wiz.target, wiz.folders);
+      wiz.missing = await resolveMissing();
+      saveWizard();
+      go('new');
+    }));
+    const r = el('div', 'row');
+    r.appendChild(find);
+    miss.appendChild(r);
+  }
+  path('n-data', wiz.dataFiles);
+  $('n-data-status').textContent = wiz.dataFiles ? `Found ${wiz.official.map((p) => p.name).join(', ')}.`
+    : 'The directory containing Morrowind.esm and game masters.';
+  $('n-data-status').className = wiz.dataFiles ? 'hint good' : 'hint';
+  $('n-data-pick').textContent = wiz.dataFiles ? 'Change…' : 'Select…';
+  const needs = [...requiredOf(wiz)].map((k) => wiz.list.find((p) => p.name.toLowerCase() === k)?.name || k);
+  $('n-needs').textContent = wiz.mode === 'edit' && needs.length ? `Required master files: ${needs.join(', ')}.` : '';
+  renderMods($('n-mods'), wiz, 'new', () => { saveWizard(); renderNew(); });
+  $('n-create').textContent = wiz.mode === 'edit' ? 'Start editing' : 'Create and start editing';
+  $('n-create').disabled = !ready();
+}
+
+async function resolveMissing() {
+  const r = await post('/api/home/resolve', { path: wiz.plugin.path, have: wiz.list.filter((p) => !same(p.path, wiz.plugin.path)).map((p) => p.path),
+                                              dataFiles: wiz.dataFiles, folders: wiz.folders.map((f) => f.path) });
+  return r.missing;
+}
+
+document.querySelectorAll('.seg [data-mode]').forEach((b) => b.addEventListener('click', () => {
+  if (b.dataset.mode === 'new' && wiz.plugin) {
+    const req = requiredOf(wiz);
+    wiz.list = wiz.list.filter((p) => !same(p.path, wiz.plugin.path) && !req.has(p.name.toLowerCase()));
+    wiz.plugin = null;
+    wiz.target = null;
+    wiz.missing = [];
+  }
+  wiz.mode = b.dataset.mode;
+  saveWizard();
+  renderNew();
+  if (wiz.mode === 'new') $('n-name').focus();
+}));
+$('n-name').addEventListener('input', () => { wiz.newName = $('n-name').value; saveWizard(); renderNew(); });
+$('n-folder-pick').addEventListener('click', () => pick('folder', wiz.newFolder || wiz.dataFiles, async (info) => {
+  wiz.newFolder = info.path;
+  saveWizard();
+  go('new');
+}));
+$('n-data-pick').addEventListener('click', () => pick('data', wiz.dataFiles, async (info) => { await useData(info.path); go('new'); }));
+
+async function useTarget(info) {
+  if (isOfficial(info)) {
+    error(new Error(`${info.name} is one of the game's own files: make a new content file that changes it instead.`));
+    return;
+  }
+  wiz.list = wiz.list.filter((p) => !(wiz.plugin && same(p.path, wiz.plugin.path)));
+  wiz.plugin = info;
+  wiz.target = info.path;
+  wiz.missing = await addPlugin(wiz.list, info, wiz.dataFiles, null, wiz.folders);
+  saveWizard();
+  go('new');
+}
+$('n-plugin-pick').addEventListener('click', () => pick('plugin', wiz.dataFiles, useTarget));
+$('n-plugin-openmw').addEventListener('click', () => pickFromOpenMW(wiz, 'new', () => {}, (item) => useTarget(item).catch(error)));
+
+$('n-create').addEventListener('click', async () => {
+  error(null);
+  try {
+    const made = await post('/api/home/create', Object.assign({
+      dataFiles: wiz.dataFiles, mode: wiz.mode, plugin: wiz.mode === 'edit' ? wiz.plugin?.path : null,
+      newName: wiz.newName, newFolder: wiz.newFolder }, payload(wiz)));
+    sessionStorage.removeItem('ce-wizard');
+    await startEditing(made.path);
+  } catch (e) { error(e); }
+});
+
+// --- Choosing a file or folder -----------------------------------------------------------------
+
+const WANT = {
+  data: { title: 'Select the Data Files folder', lead: "The folder containing Morrowind.esm and the game's master files.",
+          folder: true, needsMorrowind: true },
+  folder: { title: 'Select save location', lead: 'The folder to save the new content file in.', folder: true },
+  resource: { title: 'Add a mod', lead: "Select the mod's content file (.esm, .esp, .omwaddon): its meshes and textures "
+              + "come along. A mod with no content file (only meshes and textures): open its folder and use that.",
+              want: 'plugin', folder: true, resource: true },
+  plugin: { title: 'Select a content file', lead: 'An .esp, .esm or .omwaddon file.', want: 'plugin' },
+  project: { title: 'Select a Cell Editor project', lead: "The .json file of a project.", want: 'project' },
+};
+let browsing = null, browseDone = null, returnTo = 'projects';
+
+const system = () => (LAUNCHER && window.pywebview && window.pywebview.api && window.pywebview.api.choose
+  ? window.pywebview.api : null);
+
+async function pick(kind, start, done) {
+  const want = WANT[kind];
+  const api = !want.resource && system();
+  let path = null;
+  if (api) {
+    try { path = await api.choose(want.folder ? 'folder' : want.want, start || ''); } catch (e) { error(e); return; }
+    if (!path) return;
+  }
+  browsing = want;
+  browseDone = done;
+  returnTo = location.hash.slice(1) || 'projects';
+  $('b-title').textContent = browsing.title;
+  $('b-lead').textContent = browsing.lead;
+  $('b-choose').style.display = browsing.folder ? '' : 'none';
+  const sys = system();
+  $('b-system').style.display = sys ? '' : 'none';
+  $('b-system').textContent = browsing.want ? 'Choose a file…' : 'Choose a folder…';
+  if (path && !want.folder) { await chosen(path, false); return; }
+  if (path) {
+    let b = null;
+    try { b = await post('/api/home/browse', { path, want: 'folder' }); } catch (e) {}
+    if (b && !b.denied && (!want.needsMorrowind || b.hasMorrowind)) { await chosen(path, true); return; }
+  }
+  go('browse');
+  browse(path || start || '');
+}
+$('b-system').addEventListener('click', async () => {
+  let path = null;
+  try { path = await system().choose(browsing.want || 'folder', $('b-path').value); } catch (e) { error(e); return; }
+  if (path && browsing.want) chosen(path, false);
+  else if (path) browse(path);
+});
+
+async function chosen(path, isFolder) {
+  error(null);
+  try {
+    const info = isFolder ? (browsing.resource ? await post('/api/home/folder', { path }) : { path })
+      : browsing.want === 'plugin' ? await post('/api/home/plugin', { path }) : { path };
+    await browseDone(info);
+  } catch (e) { error(e); }
+}
+
+async function browse(path) {
+  error(null);
+  let b;
+  try { b = await post('/api/home/browse', { path, want: browsing.want || 'folder' }); } catch (e) { error(e); return; }
+  $('b-path').value = b.path;
+  $('b-places').innerHTML = '';
+  for (const p of b.places) {
+    const btn = el('button', '', p.name);
+    btn.addEventListener('click', () => browse(p.path));
+    $('b-places').appendChild(btn);
+  }
+  const list = $('b-list');
+  list.innerHTML = '';
+  const join = (name) => b.path + (b.path.endsWith(b.sep) ? '' : b.sep) + name;
+  const item = (name, label, cls, onClick) => {
+    const btn = el('button', cls);
+    btn.innerHTML = icon(name);
+    btn.append(label);
+    btn.addEventListener('click', onClick);
+    list.appendChild(btn);
+  };
+  if (b.parent) item('folderUp', 'Up one level', '', () => browse(b.parent));
+  if (b.denied) {
+    const d = el('div');
+    blockedNote(b.deniedText, d);
+    list.appendChild(d);
+  }
+  for (const f of b.files) item('file', f, 'file', () => chosen(join(f), false));
+  for (const d of b.dirs) item('folder', d, '', () => browse(join(d)));
+  if (!b.denied && !b.dirs.length && !b.files.length) list.appendChild(el('div', 'empty', 'Nothing here.'));
+  $('b-hidden').textContent = b.hidden ? `Not shown: ${b.hidden.join(', ')}. ${b.deniedText}` : '';
+  $('b-note').textContent = browsing.needsMorrowind && b.hasMorrowind ? 'Morrowind.esm found in this folder.'
+    : browsing.resource && b.hasContent ? "Select the content file (its meshes and textures will be loaded automatically)."
+    : browsing.resource && b.hasAssets ? 'Meshes and textures, but no content file: use this folder to add them.' : '';
+  $('b-choose').textContent = 'Use this folder';
+  const dataFolder = browsing.resource && resSetup && same(b.path, resSetup.dataFiles);
+  if (browsing.resource) {
+    $('b-choose').style.display = b.hasAssets && !b.hasContent && !b.denied && !dataFolder ? '' : 'none';
+  }
+  if (dataFolder) $('b-note').textContent = "The game's Data Files are always loaded: select a mod's content file, or open its folder.";
+  $('b-choose').disabled = b.denied || (browsing.needsMorrowind && !b.hasMorrowind) || (browsing.resource && !b.hasAssets);
+  $('b-choose').title = browsing.needsMorrowind && !b.hasMorrowind ? "Morrowind.esm is not in this folder"
+    : browsing.resource && !b.hasAssets ? 'No meshes or textures folder here' : '';
+  $('b-openmw-row').style.display = browsing.resource && home.cfg ? '' : 'none';
+}
+$('b-go').addEventListener('click', () => browse($('b-path').value));
+$('b-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('b-go').click(); });
+$('b-choose').addEventListener('click', () => chosen($('b-path').value, true));
+$('b-openmw').addEventListener('click', () => pickFromOpenMW(resSetup, resBack, resChanged));
+$('b-cancel').addEventListener('click', () => go(returnTo));
+$('open-project').addEventListener('click', () => pick('project', '', async (info) => startEditing(info.path)));
+
+$('quit').addEventListener('click', async () => {
+  quitting = true;
+  await fetch('/api/quit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+  document.querySelector('main').innerHTML = '<p>The editor has stopped. You can close this tab.</p>';
+});
+
+keepAlive(() => { if (!quitting) showStopped(); });
+load().catch(error);
+</script>
+</body>
+</html>
