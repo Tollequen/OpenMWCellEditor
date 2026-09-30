@@ -2,7 +2,7 @@
 
 All notable changes to OpenMW Cell Editor are documented in this file.
 
-## [0.1.0] - 2026-09-29
+## [0.2.0] - 2026-09-30
 
 Initial standalone release of **OpenMW Cell Editor** — a visual 3D cell editor and furnishing tool for Morrowind and OpenMW that runs directly in your web browser.
 
