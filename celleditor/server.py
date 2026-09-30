@@ -201,7 +201,12 @@ def project_page(path):
             folders.append({"path": d, "name": os.path.basename(d), "assets": [],
                             "missing": "not allowed" if isinstance(e, PermissionError) else "not found"})
     setup_ = launcher.openmw_setup()
-    return dict(launcher.summary(path, config), plugins=plugins, folderList=folders, blocked=launcher.areas(blocked),
+    info = launcher.summary(path, config)
+    try:
+        masters = launcher.masters_of(info["pluginPath"]) if os.path.isfile(info["pluginPath"]) else []
+    except (OSError, ValueError):
+        masters = []
+    return dict(info, plugins=plugins, folderList=folders, blocked=launcher.areas(blocked), pluginMasters=masters,
                 openmwCount=len(setup_[1]) if setup_ else 0,
                 blockedText=launcher.denied_message(blocked) if blocked else "", deletable=_in_projects_folder(path),
                 open=bool(project and project.path == path))

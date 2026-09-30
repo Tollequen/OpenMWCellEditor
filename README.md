@@ -102,6 +102,7 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
 | Deselect all | `Esc` |
 | Lock / Unlock Walls & Floors | `L` |
 | Undo | `Ctrl + Z` (`Cmd + Z` on macOS) |
+| Redo | `Ctrl + Shift + Z` or `Ctrl + Y` (`Cmd + Shift + Z` on macOS) |
 | Save Plugin | `Ctrl + S` (`Cmd + S` on macOS) |
 | Toggle UI Panel | `P` |
 

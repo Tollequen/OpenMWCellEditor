@@ -501,6 +501,7 @@
     <button id="mode-scale" class="icon" title="Scale (Y): drag the handle"><i data-icon="scale"></i></button>
     <span class="spacer"></span>
     <button id="undo" class="icon" title="Undo (Ctrl/Cmd+Z)"><i data-icon="undo"></i></button>
+    <button id="redo" class="icon" title="Redo (Ctrl/Cmd+Shift+Z)" disabled><i data-icon="redo"></i></button>
     <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i></button>
     <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button></div>
     <input type="checkbox" id="lock" checked hidden>
@@ -601,7 +602,7 @@
         <b>Z / X</b> rotate, <b>1–6</b> move step<br>
         <b>G</b> drop onto the surface below, <b>B</b> attach to object below / detach, <b>F</b> focus selection, <b>− / +</b> scale smaller / bigger<br>
         <b>L</b> lock / unlock walls &amp; floors (locked: clicks select objects in front)<br>
-        <b>Cmd/Ctrl + D</b> duplicate (a copy beside it), <b>Delete</b> delete object, <b>Ctrl/Cmd+Z</b> undo, <b>Ctrl/Cmd+S</b> save
+        <b>Cmd/Ctrl + D</b> duplicate (a copy beside it), <b>Delete</b> delete object, <b>Ctrl/Cmd+Z</b> undo, <b>Ctrl/Cmd+Shift+Z</b> redo, <b>Ctrl/Cmd+S</b> save
       </div>
     </div>
   </details>
@@ -697,7 +698,8 @@
     </div>
     <button id="tb-multi" class="tb-normal" title="Select several objects: taps add them to the selection (or take them out)">Multi</button>
     <button id="tb-add" class="tb-normal" aria-haspopup="true" aria-expanded="false">Add</button>
-    <button id="tb-undo" class="tb-normal" title="Undo">Undo</button>
+    <button id="tb-undo" class="icon tb-normal" title="Undo"><i data-icon="undo"></i></button>
+    <button id="tb-redo" class="icon tb-normal" title="Redo" disabled><i data-icon="redo"></i></button>
     <button id="tb-panel" class="icon tb-normal" title="The panel"><i data-icon="panelTop"></i></button>
     <button id="tb-hide" class="icon tb-normal" title="Hide the bar"><i data-icon="chevDown"></i></button>
     <button id="tb-save" class="primary tb-normal">Save</button>

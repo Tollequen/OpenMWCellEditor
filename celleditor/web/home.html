@@ -418,7 +418,8 @@ async function addPlugin(list, info, dataFiles, target = null, folders = []) {
 function renderResources(into, setup, changed) {
   into.innerHTML = '';
   const others = othersOf(setup);
-  const box = el('div', others.length || setup.folders.length ? 'plugins' : 'plugins empty');
+  const required = setup === page ? setup.list.filter((p) => requiredOf(setup).has(p.name.toLowerCase())) : [];
+  const box = el('div', others.length || required.length || setup.folders.length ? 'plugins' : 'plugins empty');
   const row = (name, note, bad, tools) => {
     const r = el('div', 'plugin');
     const what = el('div', 'what');
@@ -436,6 +437,9 @@ function renderResources(into, setup, changed) {
     r.append(what, t);
     box.appendChild(r);
   };
+  const mine = setup.target ? setup.target.split(/[\\/]/).pop() : 'The plugin';
+  required.forEach((p) => row(p.name, `Required: ${mine} uses its objects. Delete them in the editor and save to remove it.`,
+                              false, []));
   others.forEach((p, k) => {
     const i = setup.list.indexOf(p);
     const missing = p.masters.filter((m) => !setup.list.slice(0, i).some((q) => same(q.name, m)));
@@ -467,7 +471,7 @@ function requiredOf(setup) {
       if (!out.has(k) && !OFFICIAL.includes(k)) { out.add(k); walk(byName.get(k)); }
     }
   };
-  walk(setup.list.find((p) => same(p.path, target)) || setup.plugin);
+  walk(setup.list.find((p) => same(p.path, target)) || (setup.pluginMasters ? { masters: setup.pluginMasters } : setup.plugin));
   return out;
 }
 
@@ -511,7 +515,7 @@ async function openPage(path) {
   let p;
   try { p = await post('/api/home/project', { path }); } catch (e) { error(e); return; }
   page = Object.assign(p, { list: p.plugins.slice(), folders: p.folderList.slice(),
-                            target: p.kind === 'in place' ? p.pluginPath : null });
+                            target: p.kind === 'generator' ? null : p.pluginPath });
   try { sessionStorage.setItem('ce-page', path); } catch (err) {}
   go('project');
   renderPage();

@@ -19,7 +19,7 @@ const DEG = Math.PI / 180;
 
 const state = {
   data: null, cell: null, tiers: {}, edits: { moved: {}, deleted: [] },
-  selected: null, selection: [], undo: [], moveStep: 8, rotStep: 15, dirty: false,
+  selected: null, selection: [], undo: [], redo: [], undoMark: 0, moveStep: 8, rotStep: 15, dirty: false,
   yaw: 0, pitch: 0, speed: 400, sensitivity: 3, joy: { x: 0, y: 0 }, keys: new Set(), looking: false,
 };
 
@@ -867,6 +867,9 @@ function markSaved() {
 }
 
 function updateDirty() {
+  if (state.undo.length > state.undoMark) state.redo = [];
+  state.undoMark = state.undo.length;
+  $('redo').disabled = $('tb-redo').disabled = !state.redo.some((r) => !r.stale);
   state.dirty = canonical(state.edits) !== state.saved;
   $('save').classList.toggle('dirty', state.dirty);
   $('save').title = state.dirty ? 'Save (Ctrl/Cmd+S): there are unsaved changes' : 'Save (Ctrl/Cmd+S): nothing unsaved';
@@ -888,6 +891,8 @@ function offerDraft() {
     $('draft-banner').classList.remove('open');
     state.edits = withSections(d.edits);
     state.undo = [];
+    state.redo = [];
+    state.undoMark = 0;
     updateDirty();
     cellCache.clear();
     await loadCell(state.cell.name, true);
@@ -972,9 +977,51 @@ function edit(change, withUndo = true) {
 }
 
 function undo() {
+  const before = entriesOf(state.edits);
+  undoStep();
+  const back = diffOf(before, entriesOf(state.edits));
+  if (back.length) state.redo.push({ diff: back });
+  state.undoMark = state.undo.length;
+  updateDirty();
+}
+
+function redo() {
+  if (state.undo.length > state.undoMark) state.redo = [];
+  const r = state.redo.pop();
+  if (!r) return;
+  if (r.stale) { status('That change was changed again on another device, so redo leaves it as it is.'); updateDirty(); return; }
+  if (r.trimmed) status('Redone, except what another device changed since.');
+  const before = entriesOf(state.edits);
+  applyDiff(r.diff);
+  const back = diffOf(before, entriesOf(state.edits));
+  if (back.length) state.undo.push({ diff: back });
+  state.undoMark = state.undo.length;
+  updateDirty();
+}
+
+function diffOf(before, after) {
+  const out = [];
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    if (before.get(id) !== after.get(id)) out.push({ id, v: before.get(id) });
+  }
+  return out;
+}
+
+function applyDiff(diff) {
+  for (const { id, v } of diff) setEntry(state.edits, id, v === undefined ? null : JSON.parse(v));
+  showChanges(diff.map((d) => d.id), false);
+  setSelection(state.selection.filter((o) => o.visible && objByKey.get(o.userData.ref.key) === o));
+}
+
+function undoStep() {
   const u = state.undo.pop();
   if (!u) return;
   if (u.stale) { status('That change was changed again on another device, so undo leaves it as it is.'); return; }
+  if (u.diff) {
+    if (u.trimmed) status('Undone, except what another device changed since.');
+    applyDiff(u.diff);
+    return;
+  }
   if (u.trimmed) status('Undone, except what another device changed since.');
   if (u.groups) {
     state.edits.groups = u.groups;
@@ -1998,6 +2045,8 @@ async function revertTo(name, key) {
   state.edits = withSections(res.edits);
   live.shared = entriesOf(state.edits);
   state.undo = [];
+  state.redo = [];
+  state.undoMark = 0;
   markSaved();
   cellCache.clear();
   $('historybox').classList.remove('open');
@@ -2175,13 +2224,15 @@ window.addEventListener('keydown', (e) => {
   if ($('picker').classList.contains('open') || $('historybox').classList.contains('open')) return;
   if (document.querySelector('.dialog-bg')) return;
   if (npcEditor.isOpen()) {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
     return;
   }
   if (e.key === '?') { showGuide(); return; }
   const k = e.key.toLowerCase();
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && k === 'z') { e.preventDefault(); undo(); return; }
+  if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+  if (e.ctrlKey && k === 'y') { e.preventDefault(); redo(); return; }
   if (mod && k === 's') { e.preventDefault(); save(); return; }
   if (mod && k === 'g') { e.preventDefault(); if (e.shiftKey) ungroupSelected(); else groupButton(); return; }
   if (mod && k === 'd') { e.preventDefault(); duplicateSelected(); return; }
@@ -2387,6 +2438,7 @@ if (TOUCH) {
     if ($('tb-add-menu').classList.contains('open') && !e.target.closest('#tb-add-menu, #tb-add')) addMenu(false);
   }, true);
   $('tb-undo').addEventListener('click', undo);
+  $('tb-redo').addEventListener('click', redo);
   const multiMode = (on) => {
     state.multiTouch = on;
     document.body.classList.toggle('multi-mode', on);
@@ -2553,6 +2605,7 @@ $('group').addEventListener('click', groupButton);
 $('delete').addEventListener('click', removeSelected);
 $('duplicate').addEventListener('click', duplicateSelected);
 $('undo').addEventListener('click', undo);
+$('redo').addEventListener('click', redo);
 $('save').addEventListener('click', save);
 
 // --- NPCs ------------------------------------------------------------------
@@ -2636,6 +2689,7 @@ function showGuide() {
     [keys('F'), 'Focus selection'],
     [keys('L'), 'Lock or unlock walls and floors (Lock walls in the panel). Locked: clicks select objects in front of them'],
     [keys(cmd) + '+' + keys('Z'), 'Undo'],
+    [keys(cmd) + '+' + keys('Shift') + '+' + keys('Z'), 'Redo'],
     [keys(cmd) + '+' + keys('S'), 'Save'],
   ];
   const bg = document.createElement('div');
@@ -2836,9 +2890,9 @@ function connectLive() {
   syncSoon();
 }
 
-function showChanges(ids) {
+function showChanges(ids, remote = true) {
   for (const name of [...cellCache.keys()]) if (name !== state.cell?.name) cellCache.delete(name);
-  trimUndo(ids);
+  if (remote) trimUndo(ids);
   let refresh = false;
   for (const id of ids) {
     const [sec, k] = splitId(id);
@@ -2917,8 +2971,16 @@ function trimUndo(ids) {
     deleted: (o) => 'deleted|' + key(o),
     items: (it) => 'moved|' + key(it.obj),
   };
-  for (const u of state.undo) {
+  for (const u of [...state.undo, ...state.redo]) {
     if (u.stale) continue;
+    if (u.diff) {
+      const kept = u.diff.filter((d) => !hit.has(d.id));
+      if (kept.length === u.diff.length) continue;
+      u.diff = kept;
+      u.trimmed = true;
+      if (!kept.length) u.stale = true;
+      continue;
+    }
     if (u.groups) { if (groups) u.stale = true; continue; }
     if (u.added) { if (hit.has('added|' + u.added)) u.stale = true; continue; }
     if (u.copies) { if (u.copies.some((c) => hit.has('added|' + c.uid))) u.stale = true; continue; }
