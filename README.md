@@ -122,6 +122,29 @@ This project was developed with the assistance of AI tools because originally I 
 
 ---
 
+## Building from Source
+
+You can run the editor directly without building, or package it into a standalone application:
+
+### Run directly with Python (No build needed)
+Requires Python 3.7+ (uses only Python's standard library):
+```bash
+python3 cell_editor.py
+```
+
+### Build standalone executables
+1. Install build requirements:
+   ```bash
+   pip install pyinstaller pywebview
+   ```
+2. Build using the included PyInstaller spec:
+   ```bash
+   pyinstaller packaging/celleditor.spec
+   ```
+   The output application will be generated in `dist/`.
+
+---
+
 ## License
 
 This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details. Bundles [Three.js](https://threejs.org/) (MIT License).
