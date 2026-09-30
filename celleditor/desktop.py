@@ -1,6 +1,7 @@
 """The launcher: the start page in a pywebview window that keeps the editor running until closed."""
 import json
 import os
+import sys
 
 WINDOW = None
 FILE_TYPES = {"plugin": ("Content files (*.esm;*.esp;*.omwaddon;*.omwgame)", "All files (*.*)"),
@@ -33,9 +34,23 @@ class Api:
         return got[0] if got else None
 
 
+def _unblock():
+    """Remove the downloaded-file mark from the app's DLLs, which .NET refuses to load with it."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    for d, _, files in os.walk(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))):
+        for f in files:
+            if f.lower().endswith(".dll"):
+                try:
+                    os.remove(os.path.join(d, f) + ":Zone.Identifier")
+                except OSError:
+                    pass
+
+
 def run(url, serving, storage):
     """Show the start page until the window closes or serving ends."""
     global WINDOW
+    _unblock()
     import webview
     WINDOW = webview.create_window("OpenMW Cell Editor", url, width=1100, height=820, min_size=(720, 520),
                                    background_color="#1e1f22", js_api=Api())

@@ -1401,6 +1401,13 @@ def run(p=None, port=8765, lan=False, browser=True, code=None, game=None, settin
         try:
             desktop.run(url + "/home.html?launcher", serving,
                         os.path.dirname(SETTINGS.path) if SETTINGS else config_dir())
+        except Exception as e:
+            print("The launcher window couldn't open (%s): the start page opens in the browser." % e, flush=True)
+            GUI, AUTO_STOP = False, True
+            if not (browser and p):
+                webbrowser.open(url)
+            threading.Thread(target=_watch, daemon=True).start()
+            serving.join()
         finally:
             _rebind.clear()
             threading.Thread(target=SERVER.shutdown, daemon=True).start()
