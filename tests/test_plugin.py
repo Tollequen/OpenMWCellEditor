@@ -577,6 +577,7 @@ class Project(Base):
 """
 
 
+@unittest.skipIf(game() is None, "no game data (openmw.cfg or CELLEDITOR_DATA)")
 class Generator(unittest.TestCase):
     """A generator script that builds the plugin: the editor writes NPC and dialogue edits into it."""
 
