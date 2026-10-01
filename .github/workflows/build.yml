@@ -42,21 +42,21 @@ jobs:
             echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in celleditor/__init__.py ($VERSION)"
             exit 1
           fi
-          OUT="OpenMW-Cell-Editor-$VERSION-${{ matrix.name }}.zip"
+          OUT="Morrowind-Cell-Editor-$VERSION-${{ matrix.name }}.zip"
           cp README.md LICENSE dist/
           cd dist
           if [ "$RUNNER_OS" = "macOS" ]; then
-            ditto -c -k --keepParent "OpenMW Cell Editor.app" "../$OUT"
+            ditto -c -k --keepParent "Morrowind Cell Editor.app" "../$OUT"
             zip -j "../$OUT" README.md LICENSE
           elif [ "$RUNNER_OS" = "Windows" ]; then
-            7z a "../$OUT" "OpenMW Cell Editor" README.md LICENSE
+            7z a "../$OUT" "Morrowind Cell Editor" README.md LICENSE
           else
-            zip -r "../$OUT" "OpenMW Cell Editor" README.md LICENSE
+            zip -r "../$OUT" "Morrowind Cell Editor" README.md LICENSE
           fi
           echo "ZIP=$OUT" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v5
         with:
-          name: OpenMW-Cell-Editor-${{ matrix.name }}
+          name: Morrowind-Cell-Editor-${{ matrix.name }}
           path: ${{ env.ZIP }}
 
   release:

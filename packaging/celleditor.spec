@@ -6,7 +6,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 sys.path.insert(0, ROOT)
 from celleditor import __version__ as VERSION      # noqa: E402
 
-NAME = "OpenMW Cell Editor"
+NAME = "Morrowind Cell Editor"
 
 a = Analysis(
     [os.path.join(ROOT, "cell_editor.py")],

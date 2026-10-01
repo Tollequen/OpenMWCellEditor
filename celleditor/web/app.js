@@ -1,4 +1,4 @@
-// OpenMW Cell Editor: the 3D view and editing of a project's cells.
+// Morrowind Cell Editor: the 3D view and editing of a project's cells.
 // World axes are Morrowind's: x east, y north, z up; headings are clockwise from north.
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';

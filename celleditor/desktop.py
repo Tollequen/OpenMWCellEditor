@@ -52,7 +52,7 @@ def run(url, serving, storage):
     global WINDOW
     _unblock()
     import webview
-    WINDOW = webview.create_window("OpenMW Cell Editor", url, width=1100, height=820, min_size=(720, 520),
+    WINDOW = webview.create_window("Morrowind Cell Editor", url, width=1100, height=820, min_size=(720, 520),
                                    background_color="#1e1f22", js_api=Api())
 
     def watch():

@@ -61,7 +61,7 @@ def denied_message(folders):
     """What to say when folders can't be read."""
     names = areas(folders)
     if sys.platform == "darwin" and all(not n.startswith("/") for n in names):
-        return "OpenMW Cell Editor needs permission to read your %s folder%s." % (
+        return "Morrowind Cell Editor needs permission to read your %s folder%s." % (
             " and ".join(names), "s" if len(names) > 1 else "")
     return "The editor can't read %s." % ", ".join(names)
 

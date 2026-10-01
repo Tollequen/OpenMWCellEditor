@@ -1,4 +1,4 @@
-# OpenMW Cell Editor
+# Morrowind Cell Editor
 
 A fast, visual 3D cell editor and furnishing tool for **Morrowind** and **OpenMW** that runs directly in your web browser. 
 

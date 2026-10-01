@@ -389,7 +389,7 @@ def permission_message(e):
                 "Files and Folders, then restart the editor (on its start page)." % where)
     if sys.platform == "win32":
         return ("Windows didn't let the editor write %s. If Windows Security's Controlled folder access is on, "
-                "allow OpenMW Cell Editor there (Virus & threat protection › Ransomware protection); otherwise "
+                "allow Morrowind Cell Editor there (Virus & threat protection › Ransomware protection); otherwise "
                 "check that the file isn't read-only or open in another program." % where)
     return "No permission to use %s." % where
 
@@ -885,7 +885,7 @@ CODE_PAGE = """<!doctype html><html><head><meta charset="utf-8">
 padding-top:18vh}form{background:#18181f;border:1px solid #333;border-radius:10px;padding:20px;max-width:320px}
 input{font-size:22px;letter-spacing:.2em;width:9em;text-transform:uppercase;padding:6px;margin:10px 0}
 button{font-size:16px;padding:8px 16px}p{color:#999;font-size:14px}.bad{color:#e88}</style></head><body>
-<form method="get" action="/"><b>OpenMW Cell Editor</b><p>Enter the code the editor shows on the computer
+<form method="get" action="/"><b>Morrowind Cell Editor</b><p>Enter the code the editor shows on the computer
 it runs on.</p>%s<input name="code" autocomplete="off" autofocus><br><button>Open</button></form></body></html>"""
 FIREWALL_APP = (os.path.abspath(os.path.join(sys.executable, "..", "..", ".."))
                 if getattr(sys, "frozen", False) and sys.platform == "darwin"
@@ -1386,7 +1386,7 @@ def run(p=None, port=8765, lan=False, browser=True, code=None, game=None, settin
         raise OSError("ports %d-%d are all in use" % (port, port + 9))
     url = "http://localhost:%d" % port
     SERVER, LAN, PORT = server, lan, port
-    print("OpenMW Cell Editor%s on %s  (Ctrl+C to stop)" % (": " + p.name if p else "", url), flush=True)
+    print("Morrowind Cell Editor%s on %s  (Ctrl+C to stop)" % (": " + p.name if p else "", url), flush=True)
     if lan:
         address = "http://%s:%d" % (lan_address() or "<this computer's IP>", port)
         print("Other devices on your network: %s/?code=%s  (or open %s and enter the code %s)"

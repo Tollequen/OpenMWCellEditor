@@ -1,4 +1,4 @@
-"""OpenMW Cell Editor: serves the editor and opens it in the launcher or the browser."""
+"""Morrowind Cell Editor: serves the editor and opens it in the launcher or the browser."""
 import argparse
 import os
 import sys
@@ -45,7 +45,7 @@ def main():
     frozen = getattr(sys, "frozen", False)
     if frozen and (sys.stdout is None or not sys.stdout.isatty()):
         log_to_file()
-    ap = argparse.ArgumentParser(description="OpenMW Cell Editor")
+    ap = argparse.ArgumentParser(description="Morrowind Cell Editor")
     ap.add_argument("project", nargs="?", help="project file (.json); created if it doesn't exist")
     ap.add_argument("--port", type=int, default=int(os.environ.get("CELLEDITOR_PORT", 8765)))
     ap.add_argument("--lan", action="store_true", help="let other devices on the network connect (with a code), "
