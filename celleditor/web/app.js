@@ -351,7 +351,8 @@ function setupProject() {
   if (state.data.here === false) {
     for (const id of ['to-start', 'to-settings', 'quit']) $(id).style.display = 'none';
     $('menu-btn').disabled = true;
-    $('menu-btn').querySelector('i').style.display = 'none';
+    const arrow = $('menu-btn').querySelector('svg');
+    if (arrow) arrow.style.display = 'none';
   }
   NOOK_NAMES = (p && p.nooks) || {};
   const hasTiers = !!p && Object.keys(state.data.nooks || {}).length > 0;
