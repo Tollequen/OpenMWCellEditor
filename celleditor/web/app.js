@@ -819,7 +819,9 @@ function updateButtons() {
                        remove: 'Take just this object out of its group' }[a]
     || 'Cmd/Ctrl+click more objects, then group them: a click on one then selects them all';
   $('swap').disabled = !objs.length;
-  $('duplicate').disabled = !objs.length;
+  $('duplicate').disabled = !objs.length || objs.every(isNpc);
+  $('duplicate').title = objs.length && objs.every(isNpc) ? NO_NPC_COPIES
+    : 'A copy beside it (Cmd/Ctrl+D)';
   $('obj-history').disabled = state.selection.length !== 1;
   $('look').disabled = !state.selection.length;
 }
@@ -905,14 +907,21 @@ function offerDraft() {
 }
 
 let statusTimer = null;
+let busy = null;
 function status(msg, warn = false) {
   const t = $('toast');
   clearTimeout(statusTimer);
+  if (!msg && busy) msg = busy;
   if (!msg) { t.classList.remove('show'); return; }
   t.textContent = msg;
   t.classList.toggle('warn', warn);
   t.classList.add('show');
-  statusTimer = setTimeout(() => t.classList.remove('show'), Math.min(30000, (warn ? 8000 : 3500) + msg.length * 30));
+  if (msg !== busy) statusTimer = setTimeout(() => status(''), Math.min(30000, (warn ? 8000 : 3500) + msg.length * 30));
+}
+
+function setBusy(msg) {
+  busy = msg;
+  if (msg) status(msg);
 }
 $('toast').addEventListener('click', () => status(''));
 
@@ -1122,11 +1131,16 @@ function forgetAdded(obj, uid) {
   objByKey.delete(r.key);
 }
 
+const isNpc = (o) => o.userData.ref.kind === 'npc';
+const NO_NPC_COPIES = "NPCs aren't duplicated (it would be the same NPC twice): use Copy as new NPC… in the NPC editor.";
+
 async function duplicateSelected(rename = null) {
-  const objs = roots();
-  if (!objs.length) return;
+  const picked = roots();
+  const objs = rename ? picked : picked.filter((o) => !isNpc(o));
+  if (!objs.length) { if (picked.length) status(NO_NPC_COPIES, true); return; }
   if (state.cell.canAdd === false) { addAt(null); return; }
-  const all = [...new Set(objs.flatMap((o) => withAttached(o)))];
+  const all = [...new Set(objs.flatMap((o) => withAttached(o)))].filter((o) => rename || !isNpc(o));
+  const skipped = all.length < new Set(picked.flatMap((o) => withAttached(o))).size;
   const box = new THREE.Box3();
   for (const o of all) box.union(new THREE.Box3().setFromObject(o));
   const size = box.getSize(new THREE.Vector3());
@@ -1170,7 +1184,8 @@ async function duplicateSelected(rename = null) {
   setSelection(copies.map((c) => c.obj));
   updateDirty();
   status(rename ? `Created ${Object.values(rename).join(', ')}.`
-    : all.length > 1 ? `Duplicated ${all.length} objects.` : `Duplicated ${all[0].userData.ref.src}.`);
+    : (all.length > 1 ? `Duplicated ${all.length} objects.` : `Duplicated ${all[0].userData.ref.src}.`)
+      + (skipped ? " The NPCs weren't duplicated: use Copy as new NPC… for a separate one." : ''));
 }
 
 function removeSelected() {
@@ -1801,7 +1816,9 @@ function openMenuAt(x, y) {
     }
     if (multi || target.userData.ref.editable) {
       item(multi ? `Swap ${multi} models…` : 'Swap model…', swapSelected);
-      item(multi ? `Duplicate ${multi} objects` : 'Duplicate', duplicateSelected);
+      if (!(multi ? state.selection.every(isNpc) : isNpc(target))) {
+        item(multi ? `Duplicate ${multi} objects` : 'Duplicate', duplicateSelected);
+      }
       item(multi ? `Delete ${multi} objects` : 'Delete', removeSelected);
       item('Drop onto surface', dropToFloor);
       item('Reset', resetSelected);
@@ -2653,8 +2670,9 @@ $('tb-npc').addEventListener('click', () => { const r = state.selected?.userData
 $('reset').addEventListener('click', resetSelected);
 
 async function save() {
+  if (busy) { status(busy); return; }
   if (!state.dirty) { status('Nothing to save: no changes since the last save.'); return; }
-  status('Saving…');
+  setBusy('Saving…');
   try {
     await flushAll();
     const res = await fetch('/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2664,12 +2682,14 @@ async function save() {
     state.saved = canonical(out.edits);
     updateDirty();
     sendPicture(true);
+    setBusy(null);
     status(`Saved: ${out.moved} moved, ${out.added} added, ${out.replaced} swapped, ${out.deleted} deleted`
            + `${out.doors ? `, ${out.doors} door${out.doors > 1 ? 's' : ''} redirected` : ''}`
            + `${out.npcs ? `, ${out.npcs} NPC${out.npcs > 1 ? 's' : ''} changed or new` : ''}`
            + `${out.responses ? `, ${out.responses} response${out.responses > 1 ? 's' : ''} changed or new` : ''}.\n`
            + `${out.message}\nRestart OpenMW to see it in game.`, !!out.newMasters?.length);
   } catch (err) {
+    setBusy(null);
     status('Save failed: ' + err.message, true);
   }
 }

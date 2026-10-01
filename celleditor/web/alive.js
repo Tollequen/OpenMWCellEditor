@@ -31,15 +31,19 @@ const NOTE_CSS = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-i
   + 'border-left:3px solid var(--warn,#e0b35a);border-radius:4px;padding:8px 12px;font:14px/1.4 system-ui,sans-serif;'
   + 'box-shadow:0 10px 30px rgba(0,0,0,.45)';
 let reconnecting = null;
-function showReconnecting(on) {
+function showReconnecting(on, connected = true) {
   if (on && !reconnecting) {
     reconnecting = document.createElement('div');
     reconnecting.style.cssText = NOTE_CSS;
     reconnecting.textContent = 'Reconnecting to the editor…';
     document.body.appendChild(reconnecting);
   } else if (!on && reconnecting) {
-    reconnecting.remove();
+    const el = reconnecting;
     reconnecting = null;
+    if (!connected) { el.remove(); return; }
+    el.textContent = 'Connected again.';
+    el.style.borderLeftColor = 'var(--good,#7dbb7d)';
+    setTimeout(() => el.remove(), 2500);
   }
 }
 
@@ -78,7 +82,7 @@ export function keepAlive(onLost) {
     const waking = Date.now() - resumed < WAKING;
     if (failures >= 2 && !waking) {
       lost = true;
-      showReconnecting(false);
+      showReconnecting(false, false);
       onLost();
       return;
     }

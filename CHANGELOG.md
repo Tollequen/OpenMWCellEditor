@@ -2,6 +2,12 @@
 
 All notable changes to Morrowind Cell Editor are documented in this file.
 
+## [Unreleased]
+
+- **NPCs aren't duplicated**: Duplicate skips NPCs (it would place the same NPC twice); Copy as new NPC… makes a separate one.
+- **Copy as new NPC**: one undo step for the new NPC and its placement; copies of upgrade-tier NPCs save correctly.
+- **Messages**: "Saving…" stays until the result comes; reconnecting ends with "Connected again."
+
 ## [0.3.0] - 2026-10-01
 
 - **New name**: Morrowind Cell Editor (was OpenMW Cell Editor). Projects and settings stay where they were.
