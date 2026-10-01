@@ -106,6 +106,7 @@
   details.fold > .body { padding: 0 12px 12px; }
   label.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
   label.opt input[type=number] { width: 80px; }
+  #sel-tier { width: 100%; }
   #tiers label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
   .keys { color: var(--dim); font-size: 12px; line-height: 1.7; }
   .keys b { color: var(--text); font-weight: 600; }
@@ -568,6 +569,9 @@
     <div class="body">
       <div class="note" style="margin-bottom:4px">Upgrade tiers shown</div>
       <div id="tiers"></div>
+      <div class="note" style="margin:10px 0 4px">Selected object's tier</div>
+      <select id="sel-tier"></select>
+      <div class="note" id="sel-tier-note" style="margin-top:4px"></div>
     </div>
   </details>
   <details id="controls-help" class="fold">

@@ -648,6 +648,7 @@ function updatePanel() {
   updateTouchBar();
   updateQuickActs();
   updateButtons();
+  updateSelTier();
   const obj = state.selected;
   $('npc-row').style.display = 'none';
   if (!obj) {
@@ -1321,6 +1322,12 @@ const picker = { onPick: null, items: [], source: [], sel: 0, tier: '' };
 
 function tierChoices() {
   const sel = $('pk-tier');
+  fillTierChoices(sel);
+  sel.value = picker.tier;
+  if (sel.value !== picker.tier) sel.value = '';
+}
+
+function fillTierChoices(sel) {
   sel.innerHTML = '';
   sel.add(new Option('Always there', ''));
   for (const [nook, max] of Object.entries(state.data.nooks).sort()) {
@@ -1331,9 +1338,44 @@ function tierChoices() {
       sel.add(new Option(`${name}: only at tier ${t}`, nook + t + 'o'));
     }
   }
-  sel.value = picker.tier;
-  if (sel.value !== picker.tier) sel.value = '';
 }
+
+const tierOf = (o) => { const r = o.userData.ref; return r.nook ? `${r.nook}${r.tier}${r.only ? 'o' : ''}` : ''; };
+const canRetier = (o) => o.userData.ref.origin === 'added' && o.userData.ref.editable && !isNewNpc(o.userData.ref.src);
+
+function updateSelTier() {
+  if ($('mod-section').style.display === 'none') return;
+  const sel = $('sel-tier'), objs = state.selection;
+  if (!sel.options.length) fillTierChoices(sel);
+  const ok = objs.length > 0 && objs.every(canRetier);
+  sel.disabled = !ok;
+  const tiers = new Set(objs.map(tierOf));
+  sel.value = tiers.size === 1 ? [...tiers][0] : '';
+  $('sel-tier-note').textContent = !objs.length ? 'Select an object to change its tier.'
+    : ok ? '' : 'Only objects added in the editor can change tier.';
+}
+
+$('sel-tier').addEventListener('change', () => {
+  const objs = state.selection.filter(canRetier);
+  const v = $('sel-tier').value || null;
+  const m = v && v.match(/^([a-z]+)(\d)(o?)$/);
+  const before = entriesOf(state.edits);
+  for (const o of objs) {
+    const r = o.userData.ref;
+    const a = state.edits.added.find((x) => 'added|' + x.uid === r.key);
+    if (!a) continue;
+    a.tier = v;
+    Object.assign(r, { nook: m ? m[1] : null, tier: m ? +m[2] : null, only: !!(m && m[3]) });
+  }
+  const diff = diffOf(before, entriesOf(state.edits));
+  if (diff.length) state.undo.push({ diff });
+  $('sel-tier').blur();
+  refreshVisibility();
+  updatePanel();
+  updateDirty();
+  const hidden = objs.some((o) => !o.visible);
+  status(`${$('sel-tier').selectedOptions[0]?.text || 'Always there'}.` + (hidden ? ' It belongs to a tier that is hidden right now.' : ''));
+});
 
 async function openPicker({ title, items, types, placeholder, showTier = false, onPick, first = null, star = null,
                             attach = null, action = null, groups = [] }) {

@@ -13,6 +13,7 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 - **Connection lost**: a short "Connection to host lost" that reconnects by itself.
 - **Suggestions while typing**: item, spell, script, topic and quest fields suggest up to 50 matches once two letters are typed, instead of a long cut-off list.
 - **The whole object list**: every object of a category can be browsed; more rows load while scrolling.
+- **Tier of an added object**: projects with upgrade tiers can change the tier of a selected object added in the editor.
 
 ## [0.3.0] - 2026-10-01
 
