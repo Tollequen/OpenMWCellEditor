@@ -989,7 +989,7 @@ function redo() {
   if (state.undo.length > state.undoMark) state.redo = [];
   const r = state.redo.pop();
   if (!r) return;
-  if (r.stale) { status('That change was changed again on another device, so redo leaves it as it is.'); updateDirty(); return; }
+  if (r.stale) { status('That change was changed again on another device.'); updateDirty(); return; }
   if (r.trimmed) status('Redone, except what another device changed since.');
   const before = entriesOf(state.edits);
   applyDiff(r.diff);
@@ -1007,6 +1007,14 @@ function diffOf(before, after) {
   return out;
 }
 
+function joinSteps(from, before) {
+  const diff = diffOf(before, entriesOf(state.edits));
+  state.undo.length = from;
+  if (diff.length) state.undo.push({ diff });
+}
+
+const isNewNpc = (id) => !!state.edits.npcs[(id || '').toLowerCase()]?.new;
+
 function applyDiff(diff) {
   for (const { id, v } of diff) setEntry(state.edits, id, v === undefined ? null : JSON.parse(v));
   showChanges(diff.map((d) => d.id), false);
@@ -1016,7 +1024,7 @@ function applyDiff(diff) {
 function undoStep() {
   const u = state.undo.pop();
   if (!u) return;
-  if (u.stale) { status('That change was changed again on another device, so undo leaves it as it is.'); return; }
+  if (u.stale) { status('That change was changed again on another device.'); return; }
   if (u.diff) {
     if (u.trimmed) status('Undone, except what another device changed since.');
     applyDiff(u.diff);
@@ -1130,8 +1138,8 @@ async function duplicateSelected(rename = null) {
     const src = o.userData.ref;
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const pos = [src.pos[0] + rt[0] * step, src.pos[1] + rt[1] * step, src.pos[2]];
-    const tier = src.nook ? `${src.nook}${src.tier}${src.only ? 'o' : ''}` : null;
     const as = rename && rename[src.src.toLowerCase()];
+    const tier = src.nook && !as && !isNewNpc(src.src) ? `${src.nook}${src.tier}${src.only ? 'o' : ''}` : null;
     const r = { key: 'added|' + uid, id: as || src.id, src: as || src.src, kind: src.kind, mesh: src.mesh, pos, rot: [...src.rot],
                 scale: src.scale, editable: true, origin: 'added', structure: false, isDoor: src.isDoor, door: src.door,
                 nook: src.nook || null, tier: src.tier ?? null, only: !!src.only };
@@ -1634,7 +1642,7 @@ function addAt(hit, kind = 'object') {
     const quarter = Math.PI / 2;
     const yaw = ((Math.round((state.yaw + Math.PI) / quarter) * quarter) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const tier = ($('pk-tier').options.length && picker.tier) || null;
+    const tier = (!isNewNpc(o.id) && $('pk-tier').options.length && picker.tier) || null;
     const m = tier && tier.match(/^([a-z]+)(\d)(o?)$/);
     const npc = o.type === 'NPC';
     const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: npc ? 'npc' : 'mesh', mesh: npc ? null : o.mesh, pos: pos.toArray(),
@@ -1651,6 +1659,9 @@ function addAt(hit, kind = 'object') {
     const grouped = group && offered('pk-group-row') && state.edits.groups[group] && $('pk-group').checked;
     if (grouped) state.edits.groups[group].push(r.key);
     state.undo.push({ obj, added: uid });
+    const join = state.joinCopy;
+    state.joinCopy = null;
+    if (preset && join && join.id === o.id && state.undo.length === join.from + 2) joinSteps(join.from, join.before);
     refreshVisibility();
     select(obj.visible ? obj : null, false, true);
     updateDirty();
@@ -2614,16 +2625,21 @@ const npcEditor = setupNpcEditor({
   state, status, save, changed: updateDirty, closed: resumeFlySoon,
   async placeCopy(n, fromId) {
     const o = { id: n.id, name: n.name, type: 'NPC', mesh: '' };
+    const from = state.undo.length - 1, before = entriesOf(state.edits);
+    before.delete('npcs|' + n.id.toLowerCase());
     const src = fromId && ([state.selected, ...objByKey.values()].find((x) => x && x.visible
       && x.userData.ref.kind === 'npc' && x.userData.ref.src.toLowerCase() === fromId.toLowerCase()));
     if (!src || !src.userData.ref.editable) {
       state.placeObject = o;
+      state.joinCopy = { id: n.id, from, before };
       startPlacing();
       $('place-text').textContent = `Click where to place ${n.name || n.id}.`;
       return;
     }
     setSelection([src]);
     await duplicateSelected({ [fromId.toLowerCase()]: n.id });
+    if (state.undo.length === from + 2) joinSteps(from, before);
+    updateDirty();
     status(`Created ${n.name || n.id} (copied from ${npcEditor.nameOf(fromId)}).`);
   },
 });
@@ -2953,6 +2969,7 @@ async function refreshCell() {
     refreshVisibility();
     setSelection(state.selection.filter((o) => objByKey.get(o.userData.ref.key) === o));
     updateMarkers();
+    npcEditor.refresh([]);
   } finally {
     live.refreshing = false;
     if (live.refreshAgain) { live.refreshAgain = false; refreshCell(); }

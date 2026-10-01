@@ -781,10 +781,13 @@ def clean_edits(edits):
 
 
 def _base_ids(edits):
-    """Make added objects in an upgrade tier name the object they copy."""
+    """Make added objects in an upgrade tier name the object they copy; new NPCs have no tier to copy them for."""
     clones = {k.lower(): v for k, v in project.clones().items()}
+    new = {k.lower() for k, v in (edits.get("npcs") or {}).items() if v and v.get("new")}
     for a in edits.get("added") or []:
-        if a.get("tier") and a["id"].lower() in clones:
+        if a.get("tier") and a["id"].lower() in new:
+            a["tier"] = None
+        elif a.get("tier") and a["id"].lower() in clones:
             a["id"] = clones[a["id"].lower()]
     return edits
 

@@ -826,7 +826,7 @@ async function idProblem(id) {
   return taken ? `${taken[1]} already has ${taken[0]} with that id (ids are shared by every kind of object).` : '';
 }
 
-function copyDialog(f, where) {
+function copyDialog(f) {
   const bg = dialog('<h3>New NPC</h3>'
     + '<p class="dim"></p>'
     + '<label class="npc-f"><span>Id</span><input type="text" id="nc-id" maxlength="31" autocomplete="off"></label>'
@@ -834,7 +834,7 @@ function copyDialog(f, where) {
     + '<p id="nc-err" class="bad" style="display:none;white-space:pre-wrap"></p>'
     + '<div class="bar"><button id="nc-cancel">Cancel</button><button id="nc-ok" class="primary">Create</button></div>');
   bg.querySelector('p.dim').textContent = `A copy of ${f.name || f.id} with everything they have: stats, looks, `
-    + `inventory, spells and wander (not travel destinations, other AI packages or dialogue). It stands ${where}.`;
+    + 'inventory, spells and wander (not travel destinations, other AI packages or dialogue).';
   const idIn = bg.querySelector('#nc-id'), nameIn = bg.querySelector('#nc-name'), err = bg.querySelector('#nc-err');
   idIn.value = `${f.id}_2`.slice(0, 31);
   nameIn.value = f.name;
@@ -861,7 +861,7 @@ function copyDialog(f, where) {
 async function copyAsNew() {
   const f = fields();
   const beside = cellNpcs().some((n) => n.id.toLowerCase() === f.id.toLowerCase());
-  const n = await copyDialog(f, beside ? 'beside them' : 'where you click next');
+  const n = await copyDialog(f);
   if (!n) return;
   if (beside) {
     await api.placeCopy(n, f.id);
