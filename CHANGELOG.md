@@ -11,6 +11,8 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 - **Only the host manages projects**: other devices edit the open project, but opening, creating, deleting and setting up projects, browsing the host's folders and quitting are done on the host.
 - **Greetings**: choosing Greeting 5 (or a topic) from the list adds it at once; shorter explanations of what each greeting is for.
 - **Connection lost**: a short "Connection to host lost" that reconnects by itself.
+- **Suggestions while typing**: item, spell, script, topic and quest fields suggest up to 50 matches once two letters are typed, instead of a long cut-off list.
+- **The whole object list**: every object of a category can be browsed; more rows load while scrolling.
 
 ## [0.3.0] - 2026-10-01
 

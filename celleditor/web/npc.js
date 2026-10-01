@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import { showDialogue, refreshDialogue } from './topics.js';
+import { setSuggestions, suggest } from './suggest.js';
 
 const $ = (id) => document.getElementById(id);
 let api = null;
@@ -364,11 +365,9 @@ function bodyParts(f, part) {
 }
 
 function fillDatalists() {
-  const items = $('npc-items'), spells = $('npc-spells'), scripts = $('npc-scripts');
-  items.innerHTML = spells.innerHTML = scripts.innerHTML = '';
-  for (const o of lists.items) items.appendChild(new Option(o.name ? `${o.name} · ${o.type}` : o.type, o.id));
-  for (const o of lists.spells) spells.appendChild(new Option(`${o.name || o.id} · ${o.type}`, o.id));
-  for (const s of lists.scripts) scripts.appendChild(new Option('', s));
+  setSuggestions('npc-items', lists.items.map((o) => [o.id, o.name ? `${o.name} · ${o.type}` : o.type]));
+  setSuggestions('npc-spells', lists.spells.map((o) => [o.id, `${o.name || o.id} · ${o.type}`]));
+  setSuggestions('npc-scripts', lists.scripts.map((s) => [s, '']));
 }
 
 function build() {
@@ -428,7 +427,7 @@ function build() {
   c.hair.addEventListener('change', () => setFields({ hair: c.hair.value }));
   c.script = labelled(looks, 'Script', el('input'));
   c.script.type = 'text';
-  c.script.setAttribute('list', 'npc-scripts');
+  suggest(c.script, 'npc-scripts');
   c.script.placeholder = 'None';
   c.script.addEventListener('change', () => setFields({ script: c.script.value.trim() }));
   c.model = labelled(looks, 'Animation', el('input'));
@@ -562,7 +561,7 @@ function addRow(listId, placeholder, withCount, onAdd) {
   }
   const id = el('input');
   id.type = 'text';
-  id.setAttribute('list', listId);
+  suggest(id, listId);
   id.placeholder = placeholder;
   row.appendChild(id);
   const b = el('button', null, 'Add');
@@ -727,7 +726,7 @@ function fillItems(f) {
     });
     const id = el('input', 'id');
     id.type = 'text';
-    id.setAttribute('list', 'npc-items');
+    suggest(id, 'npc-items');
     id.addEventListener('change', () => {
       const items = fields().items.map((x) => [...x]);
       items[i][1] = id.value.trim();
@@ -754,7 +753,7 @@ function fillSpells(f) {
     const row = el('div', 'npc-line');
     const id = el('input', 'id');
     id.type = 'text';
-    id.setAttribute('list', 'npc-spells');
+    suggest(id, 'npc-spells');
     id.addEventListener('change', () => {
       const spells = [...fields().spells];
       spells[i] = id.value.trim();

@@ -1429,41 +1429,55 @@ function closePicker() {
   resumeFlySoon();
 }
 
+const PICKER_ROWS = 250;
+
 function renderPicker() {
   const list = $('pk-list');
   list.innerHTML = '';
-  const shown = picker.items.slice(0, 250);
   picker.paints = new Map();
-  shown.forEach((o, i) => {
-    const row = document.createElement('div');
-    row.className = 'pk-item' + (i === picker.sel ? ' sel' : '');
-    row.innerHTML = '<span class="n"></span><span class="t"></span>';
-    row.querySelector('.n').textContent = o.name ? `${o.name}  ` : o.id;
-    if (o.name) {
-      const id = document.createElement('span');
-      id.className = 'i';
-      id.textContent = o.id;
-      row.querySelector('.n').appendChild(id);
-    }
-    row.querySelector('.t').textContent = o.type;
-    if (picker.star) {
-      const st = document.createElement('span');
-      const paint = () => { const on = picker.star.on(o); st.innerHTML = icon(on ? 'starFilled' : 'star'); st.className = 'star' + (on ? ' on' : ''); };
-      paint();
-      picker.paints.set(o, paint);
-      st.title = 'Favourite';
-      st.addEventListener('click', async (e) => { e.stopPropagation(); await picker.star.toggle(o); paint(); paintPreviewStar(); });
-      row.appendChild(st);
-    }
-    row.addEventListener('click', () => (TOUCH && picker.sel !== i && previewing() ? highlight(i) : pick(o)));
-    row.addEventListener('mouseenter', () => { if (!TOUCH) showPreview(o); });
-    list.appendChild(row);
-  });
+  picker.shown = 0;
+  moreRows(PICKER_ROWS);
   showPreview(picker.items[picker.sel]);
-  $('pk-count').textContent = picker.items.length > shown.length
-    ? `${picker.items.length} matches, showing the first ${shown.length}: type more to narrow it down`
-    : `${picker.items.length} matches`;
+  $('pk-count').textContent = `${picker.items.length} matches`;
   list.children[picker.sel]?.scrollIntoView({ block: 'nearest' });
+}
+
+function moreRows(upTo = picker.shown + PICKER_ROWS) {
+  const list = $('pk-list');
+  const end = Math.min(picker.items.length, upTo);
+  for (let i = picker.shown; i < end; i++) list.appendChild(pickerRow(picker.items[i], i));
+  picker.shown = Math.max(picker.shown, end);
+}
+
+$('pk-list').addEventListener('scroll', () => {
+  const l = $('pk-list');
+  if (l.scrollTop + l.clientHeight > l.scrollHeight - 600) moreRows();
+});
+
+function pickerRow(o, i) {
+  const row = document.createElement('div');
+  row.className = 'pk-item' + (i === picker.sel ? ' sel' : '');
+  row.innerHTML = '<span class="n"></span><span class="t"></span>';
+  row.querySelector('.n').textContent = o.name ? `${o.name}  ` : o.id;
+  if (o.name) {
+    const id = document.createElement('span');
+    id.className = 'i';
+    id.textContent = o.id;
+    row.querySelector('.n').appendChild(id);
+  }
+  row.querySelector('.t').textContent = o.type;
+  if (picker.star) {
+    const st = document.createElement('span');
+    const paint = () => { const on = picker.star.on(o); st.innerHTML = icon(on ? 'starFilled' : 'star'); st.className = 'star' + (on ? ' on' : ''); };
+    paint();
+    picker.paints.set(o, paint);
+    st.title = 'Favourite';
+    st.addEventListener('click', async (e) => { e.stopPropagation(); await picker.star.toggle(o); paint(); paintPreviewStar(); });
+    row.appendChild(st);
+  }
+  row.addEventListener('click', () => (TOUCH && picker.sel !== i && previewing() ? highlight(i) : pick(o)));
+  row.addEventListener('mouseenter', () => { if (!TOUCH) showPreview(o); });
+  return row;
 }
 
 function filterPicker() {
@@ -1508,11 +1522,12 @@ $('pk-search').addEventListener('keydown', (e) => {
   const d = { ArrowDown: 1, ArrowUp: -1 }[e.key];
   if (d) {
     e.preventDefault();
-    highlight(Math.max(0, Math.min(Math.min(picker.items.length, 250) - 1, picker.sel + d)));
+    highlight(Math.max(0, Math.min(picker.items.length - 1, picker.sel + d)));
   }
 });
 
 function highlight(i) {
+  if (i >= picker.shown) moreRows(i + PICKER_ROWS);
   const rows = $('pk-list').children;
   rows[picker.sel]?.classList.remove('sel');
   picker.sel = i;

@@ -1,6 +1,7 @@
 // An NPC's dialogue in the NPC editor: greetings and topic responses in the game's order
 // INFOs form a linked list: no two edits may follow the same response
 import { icon } from './icons.js';
+import { isSuggestion, setSuggestions, suggest } from './suggest.js';
 
 const $ = (id) => document.getElementById(id);
 let ctx = null;
@@ -80,20 +81,16 @@ async function reload() {
 }
 
 function fillTopicList() {
-  let dl = $('npc-topics');
-  if (!dl) {
-    dl = el('datalist');
-    dl.id = 'npc-topics';
+  for (const id of ['npc-topics', 'npc-quests']) {
+    if ($(id)) continue;
+    const dl = el('datalist');
+    dl.id = id;
     document.body.appendChild(dl);
   }
-  if (dl.childElementCount) return;
-  for (let i = 0; i < 10; i++) dl.appendChild(new Option(greetingLabel(i), `Greeting ${i}`));
-  for (const t of names) if (t.type === 0) dl.appendChild(new Option('', t.name));
-  for (const t of names) if (t.type === 3) dl.appendChild(new Option('Persuasion', t.name));
-  const quests = el('datalist');
-  quests.id = 'npc-quests';
-  for (const t of names) if (t.type === 4) quests.appendChild(new Option('', t.name));
-  document.body.appendChild(quests);
+  const greetings = [...Array(10).keys()].map((i) => [`Greeting ${i}`, greetingLabel(i)]);
+  setSuggestions('npc-topics', [...greetings, ...names.filter((t) => t.type === 0).map((t) => [t.name, '']),
+                                ...names.filter((t) => t.type === 3).map((t) => [t.name, 'Persuasion'])], greetings);
+  setSuggestions('npc-quests', names.filter((t) => t.type === 4).map((t) => [t.name, '']));
 }
 
 // --- Changes: one undo step each (several entries when a chain changes) ------------------
@@ -199,7 +196,7 @@ function render() {
   const add = el('div', 'dlg-add');
   const topic = el('input');
   topic.type = 'text';
-  topic.setAttribute('list', 'npc-topics');
+  suggest(topic, 'npc-topics');
   topic.placeholder = 'Greeting 5, or a topic (e.g. latest rumors)';
   const addTopic = el('button', null, 'Add response');
   const go = () => {
@@ -216,7 +213,7 @@ function render() {
   topic.addEventListener('input', (e) => {
     const picked = !e.inputType || e.inputType === 'insertReplacementText';
     const v = topic.value.trim().toLowerCase();
-    if (picked && [...$('npc-topics').options].some((o) => o.value.toLowerCase() === v)) go();
+    if (picked && isSuggestion('npc-topics', v)) go();
   });
   add.append(topic, addTopic);
   box.appendChild(add);
@@ -435,7 +432,7 @@ function conditionRow(c, on, onSet) {
     const k = kind.value;
     func.style.display = k === 'function' ? '' : 'none';
     name.style.display = k === 'function' ? 'none' : '';
-    name.setAttribute('list', k === 'journal' ? 'npc-quests' : k === 'item' ? 'npc-items' : '');
+    suggest(name, k === 'journal' ? 'npc-quests' : k === 'item' ? 'npc-items' : '');
     name.placeholder = { journal: 'quest id', item: 'item id', dead: 'NPC or creature id', global: 'variable',
                          local: 'variable', notLocal: 'variable', notId: 'id', notFaction: 'faction id',
                          notClass: 'class id', notRace: 'race id', notCell: 'cell name' }[k] || '';
