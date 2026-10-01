@@ -265,7 +265,8 @@ class Project:
         refnums = writer.RefNums(self.file("refnums"))
         data, written, count = writer.rewrite_plugin(
             self.file("base"), cells, vanilla, refnums, masters, self._cell_key(key_of), key_of, head_of,
-            lambda r: index[r["origin"].lower()], {("NPC_", k): rec for k, rec in npcs}, topics)
+            lambda r: index[r["origin"].lower()], {("NPC_", k): rec for k, rec in npcs}, topics,
+            persistent=self.persistent())
         writer.write_file(self.plugin, data)
         refnums.save()
         self.config["written"] = hashlib.sha1(data).hexdigest()
@@ -284,6 +285,25 @@ class Project:
                 return esp.cstr(d["NAME"])
             return key_of(struct.unpack_from("<ii", d["DATA"], 4))
         return cell_key
+
+    def persistent(self):
+        """Whether an object's references are persistent: NPCs, creatures and records flagged persistent (0x400)."""
+        new = {k.lower() for k in self.load_edits().get("npcs") or {}}
+        files, seen = list(reversed(self.load.files)), {}
+
+        def check(oid):
+            k = oid.lower()
+            if k in new:
+                return True
+            if k not in seen:
+                seen[k] = False
+                for f in files:
+                    hit = next(((tag, ids[k]) for tag, ids in esp.named_records(f.path).items() if k in ids), None)
+                    if hit:
+                        seen[k] = hit[0] in ("NPC_", "CREA") or bool(esp.record_subs(f.path, hit[1])[1] & 0x400)
+                        break
+            return seen[k]
+        return check
 
     def origins(self):
         """{object id (lower case): the file that defines it}."""
@@ -420,10 +440,12 @@ class Project:
                     raise
                 return writer.exterior_head(esp.parse_exterior(cell))
         records, count = writer.edited_cell_records(cells, vanilla, None, refnums, head_of=head_of,
-                                                    master_index=lambda r: index[r["origin"].lower()])
+                                                    master_index=lambda r: index[r["origin"].lower()],
+                                                    persistent=self.persistent())
         writer.write_file(self.plugin, writer.plugin_bytes([rec for _, rec in npcs] + records + list(topics.values()),
                                                            [m.path for m in masters],
-                                                           self.config["description"], self.config["author"]))
+                                                           self.config["description"], self.config["author"],
+                                                           master=self.plugin.lower().endswith(".esm")))
         refnums.save()
         return "wrote %s with %d cells and %d new references%s (masters: %s)%s" % (
             os.path.basename(self.plugin), len(records), count, _npcs_text(npcs, topics), ", ".join(names),

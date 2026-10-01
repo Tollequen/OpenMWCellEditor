@@ -262,9 +262,9 @@ def exterior_head(grid):
 
 # --- Plugin files --------------------------------------------------------------------
 
-def plugin_bytes(records, masters, description="", author=""):
-    """A whole plugin: the TES3 header, then the records."""
-    header = struct.pack("<fI", 1.3, 0)
+def plugin_bytes(records, masters, description="", author="", master=False):
+    """A whole plugin: the TES3 header, then the records; master: an .esm."""
+    header = struct.pack("<fI", 1.3, 1 if master else 0)
     header += author.encode("latin1")[:31].ljust(32, b"\0")
     header += description.encode("latin1")[:255].ljust(256, b"\0")
     header += struct.pack("<I", len(records))
@@ -274,7 +274,32 @@ def plugin_bytes(records, masters, description="", author=""):
     return record("TES3", subs) + b"".join(records)
 
 
-def edited_cell_records(cells, vanilla, master, refnums, names=None, head_of=None, master_index=None):
+def temp_marked(entries, persistent):
+    """A cell's references laid out like the Construction Set's: persistent ones, NAM0, then the temporary ones."""
+    first, rest, doors = [], [], 0
+    for entry in entries:
+        oid, door, q = None, False, 0
+        while q + 8 <= len(entry):
+            tag = entry[q:q + 4]
+            size = struct.unpack_from("<I", entry, q + 4)[0]
+            if tag == b"NAME" and oid is None:
+                oid = cstr(entry[q + 8:q + 8 + size])
+            elif tag == b"DODT":
+                door = True
+            q += 8 + size
+        if door or (oid is not None and persistent(oid)):
+            first.append(entry)
+            doors += door
+        else:
+            rest.append(entry)
+    if not entries:
+        return []
+    # NAM0 counts the temporary references and the doors that teleport, as in Morrowind.esm
+    return first + [sub("NAM0", struct.pack("<i", len(rest) + doors))] + rest
+
+
+def edited_cell_records(cells, vanilla, master, refnums, names=None, head_of=None, master_index=None,
+                        persistent=None):
     """CELL records for the master's cells: header, new references and overrides."""
     records, count = [], 0
     for name in (sorted(cells) if names is None else names):
@@ -284,7 +309,8 @@ def edited_cell_records(cells, vanilla, master, refnums, names=None, head_of=Non
         if not refs and not overrides:
             continue
         head = [sub(s_, v) for s_, v in (head_of(name) if head_of else cell_refs(master, name)[0])]
-        records.append(record("CELL", head + encode_refs(refs, refnums) + overrides))
+        entries = encode_refs(refs, refnums) + overrides
+        records.append(record("CELL", head + (temp_marked(entries, persistent) if persistent else entries)))
         count += len(refs)
     return records, count
 
@@ -313,7 +339,7 @@ def _entry_bytes(num, subs):
 
 
 def rewrite_plugin(base, cells, vanilla, refnums, masters, cell_key, key_of, head_of, master_index, objects=None,
-                   dialogue=None):
+                   dialogue=None, persistent=None):
     """An existing plugin with the edits written into it; other records stay as they were."""
     with open(base, "rb") as f:
         data = f.read()
@@ -420,11 +446,14 @@ def rewrite_plugin(base, cells, vanilla, refnums, masters, cell_key, key_of, hea
             continue
         done.add(cell.lower())
         written += 1
-        body.append(record("CELL", [sub(s_, v) for s_, v in head] + out + extra, flags))
+        entries = out + extra
+        body.append(record("CELL", [sub(s_, v) for s_, v in head]
+                           + (temp_marked(entries, persistent) if persistent else entries), flags))
     for cell, refs in adds.items():
         if cell.lower() not in done and refs:
             written += 1
-            body.append(record("CELL", [sub(s_, v) for s_, v in head_of(cell)] + refs))
+            body.append(record("CELL", [sub(s_, v) for s_, v in head_of(cell)]
+                               + (temp_marked(refs, persistent) if persistent else refs)))
 
     # The header: HEDR's record count at offset 296, and a MAST + DATA (file size) per master.
     hedr = dict(records[0][3])["HEDR"]

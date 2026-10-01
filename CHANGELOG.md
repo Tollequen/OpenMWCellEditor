@@ -2,6 +2,11 @@
 
 All notable changes to OpenMW Cell Editor are documented in this file.
 
+## [Unreleased]
+
+- **File type for new content files**: `.omwaddon` (OpenMW), `.esp` or `.esm` (a master file, marked as one in its header).
+- **Construction Set cell layout**: rebuilt cells list persistent references (NPCs, creatures, doors that teleport) first, then the `NAM0` marker and the rest, as the original Construction Set writes them.
+
 ## [0.2.0] - 2026-09-30
 
 Initial standalone release of **OpenMW Cell Editor** — a visual 3D cell editor and furnishing tool for Morrowind and OpenMW that runs directly in your web browser.

@@ -257,7 +257,8 @@ def create_project(body):
             raise ValueError("Select the folder to save the content file in.")
         if launcher.can_read(where) is False:
             raise PermissionError(13, "not allowed", where)
-        target_path = os.path.join(where, name + ".omwaddon")
+        ext = body.get("newType") if body.get("newType") in (".omwaddon", ".esp", ".esm") else ".omwaddon"
+        target_path = os.path.join(where, name + ext)
         if os.path.exists(target_path):
             raise ValueError("There's already a %s in that folder." % os.path.basename(target_path))
     folders = [launcher.folder_info(d)["path"] for d in body.get("folders") or []]

@@ -95,6 +95,41 @@ class NewProject(unittest.TestCase):
         refs = dict(refs_of(self.p.plugin, CELL))
         self.assertEqual(esp.cstr(refs[3]["NAME"]), "barrel_01")
 
+    def test_construction_set_layout(self):
+        """Persistent references come first, then NAM0 (temporary ones and doors that teleport), then the rest."""
+        door = next(r for r in self.vanilla if r["dest"] is not None)
+        edits = writer.empty_edits()
+        edits["moved"][door["key"]] = {"pos": door["pos"], "rot": [0.0, 0.0, 1.0]}
+        edits["added"] = [{"uid": "a1", "cell": CELL, "id": "barrel_01", "pos": [1.0, 2.0, 3.0],
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None},
+                          {"uid": "a2", "cell": CELL, "id": "fargoth", "pos": [4.0, 5.0, 6.0],
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None}]
+        self.save_edits(edits)
+        self.p.build()
+        subs = next(s for t, _, s in esp.esm_records(self.p.plugin) if t == "CELL")
+        names, marker, nam0 = [], None, None
+        for s_, v in subs:
+            if s_ == "FRMR":
+                names.append([None, False, marker is not None])
+            elif s_ == "NAME" and names and names[-1][0] is None:
+                names[-1][0] = esp.cstr(v).lower()
+            elif s_ == "DODT" and names:
+                names[-1][1] = True
+            elif s_ == "NAM0":
+                marker, nam0 = len(names), struct.unpack("<i", v)[0]
+        self.assertEqual(sorted((n, after) for n, _, after in names),
+                         sorted([(door["id"].lower(), False), ("fargoth", False), ("barrel_01", True)]))
+        self.assertEqual(nam0, 1 + 1)
+
+    def test_file_types(self):
+        """An .esm is marked as a master in its header; .esp and .omwaddon files are plugins."""
+        for ext, flag in ((".esm", 1), (".esp", 0), (".omwaddon", 0)):
+            path = project.create_new(os.path.join(self.dir, ext[1:]), os.path.join(self.dir, "T" + ext))
+            p = project.load(path, game())
+            p.build()
+            hedr = dict(next(esp.esm_records(p.plugin))[2])["HEDR"]
+            self.assertEqual(struct.unpack_from("<I", hedr, 4)[0], flag, ext)
+
     def test_lock_key(self):
         """A generated door's lock key is written as KNAM, not the edit key."""
         refs = {"Test cell": [writer.ref("in_hlaalu_door", 0, 0, 0, lock=50, lock_key="my_key"),
@@ -671,6 +706,9 @@ class Launcher(unittest.TestCase):
         self.assertEqual([f.name for f in p.load.files], [os.path.basename(x) for x in self.official])
         self.assertTrue(p.path.startswith(os.path.join(self.dir, "projects")))
         self.assertEqual(self.server.SETTINGS.get("last_data_files"), self.data)
+        made = self.server.create_project({"dataFiles": self.data, "mode": "new", "newName": "My Master",
+                                           "newType": ".esm", "newFolder": out, "loadOrder": self.official})
+        self.assertTrue(os.path.exists(os.path.join(out, "My Master.esm")))
 
     def test_edit_plugin(self):
         t = InPlace("test_edits")

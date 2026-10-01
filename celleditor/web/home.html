@@ -139,6 +139,12 @@
         <div class="frow"><div class="flabel">Name</div>
           <div><input type="text" id="n-name" placeholder="e.g. MyHouse" autocomplete="off">
             <div class="hint" id="n-file"></div></div></div>
+        <div class="frow"><div class="flabel">File type</div>
+          <div><select id="n-type">
+            <option value=".omwaddon">.omwaddon (OpenMW)</option>
+            <option value=".esp">.esp (plugin)</option>
+            <option value=".esm">.esm (master file, for mods that others build on)</option>
+          </select></div></div>
         <div class="frow"><div class="flabel">Save location</div>
           <div><div class="field"><div class="path" id="n-folder">Not selected yet</div>
             <button id="n-folder-pick">Browse…</button></div>
@@ -668,7 +674,8 @@ $('o-add').addEventListener('click', () => openmwDone && openmwDone().catch(erro
 
 // --- New project (one screen) --------------------------------------------------------------------
 
-const EMPTY = () => ({ mode: 'new', dataFiles: null, official: [], plugin: null, newName: '', newFolder: '', list: [],
+const EMPTY = () => ({ mode: 'new', dataFiles: null, official: [], plugin: null, newName: '', newType: '.omwaddon',
+                       newFolder: '', list: [],
                        folders: [], target: null, missing: [], baseOrder: 'game', standalone: false, openmwCount: 0 });
 let wiz = EMPTY();
 function saveWizard() { try { sessionStorage.setItem('ce-wizard', JSON.stringify(wiz)); } catch (err) {} }
@@ -710,7 +717,8 @@ function renderNew() {
   $('n-new').style.display = wiz.mode === 'new' ? '' : 'none';
   $('n-edit').style.display = wiz.mode === 'edit' ? '' : 'none';
   if (document.activeElement !== $('n-name')) $('n-name').value = wiz.newName;
-  $('n-file').textContent = wiz.newName.trim() ? `Saved as ${wiz.newName.trim()}.omwaddon` : '';
+  $('n-file').textContent = wiz.newName.trim() ? `Saved as ${wiz.newName.trim()}${wiz.newType}` : '';
+  $('n-type').value = wiz.newType;
   const path = (id, value) => {
     $(id).textContent = value ? short(value) : 'Not selected yet';
     $(id).classList.toggle('none', !value);
@@ -764,6 +772,7 @@ document.querySelectorAll('.seg [data-mode]').forEach((b) => b.addEventListener(
   if (wiz.mode === 'new') $('n-name').focus();
 }));
 $('n-name').addEventListener('input', () => { wiz.newName = $('n-name').value; saveWizard(); renderNew(); });
+$('n-type').addEventListener('change', () => { wiz.newType = $('n-type').value; saveWizard(); renderNew(); });
 $('n-folder-pick').addEventListener('click', () => pick('folder', wiz.newFolder || wiz.dataFiles, async (info) => {
   wiz.newFolder = info.path;
   saveWizard();
@@ -791,7 +800,7 @@ $('n-create').addEventListener('click', async () => {
   try {
     const made = await post('/api/home/create', Object.assign({
       dataFiles: wiz.dataFiles, mode: wiz.mode, plugin: wiz.mode === 'edit' ? wiz.plugin?.path : null,
-      newName: wiz.newName, newFolder: wiz.newFolder }, payload(wiz)));
+      newName: wiz.newName, newType: wiz.newType, newFolder: wiz.newFolder }, payload(wiz)));
     sessionStorage.removeItem('ce-wizard');
     await startEditing(made.path);
   } catch (e) { error(e); }
