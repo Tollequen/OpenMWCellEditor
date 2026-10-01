@@ -2,7 +2,7 @@
 
 All notable changes to Morrowind Cell Editor are documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-01
 
 - **New name**: Morrowind Cell Editor (was OpenMW Cell Editor). Projects and settings stay where they were.
 - **File type for new content files**: `.omwaddon` (OpenMW), `.esp` or `.esm` (a master file, marked as one in its header).
