@@ -7,6 +7,10 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 - **NPCs aren't duplicated**: Duplicate skips NPCs (it would place the same NPC twice); Copy as new NPC… makes a separate one.
 - **Copy as new NPC**: one undo step for the new NPC and its placement; copies of upgrade-tier NPCs save correctly.
 - **Messages**: "Saving…" stays until the result comes; reconnecting ends with "Connected again."
+- **Recent objects**: the object list has a Recent category: the last 20 objects added or swapped in, newest first.
+- **Only the host manages projects**: other devices edit the open project, but opening, creating, deleting and setting up projects, browsing the host's folders and quitting are done on the host.
+- **Greetings**: choosing Greeting 5 (or a topic) from the list adds it at once; shorter explanations of what each greeting is for.
+- **Connection lost**: a short "Connection to host lost" that reconnects by itself.
 
 ## [0.3.0] - 2026-10-01
 

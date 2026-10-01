@@ -348,6 +348,11 @@ function setupProject() {
   const p = state.data.project;
   if (p && p.name) document.title = `${p.name} · Cell Editor`;
   if (p) $('menu-name').textContent = p.plugin;
+  if (state.data.here === false) {
+    for (const id of ['to-start', 'to-settings', 'quit']) $(id).style.display = 'none';
+    $('menu-btn').disabled = true;
+    $('menu-btn').querySelector('i').style.display = 'none';
+  }
   NOOK_NAMES = (p && p.nooks) || {};
   const hasTiers = !!p && Object.keys(state.data.nooks || {}).length > 0;
   $('mod-section').style.display = hasTiers ? '' : 'none';
@@ -1366,13 +1371,21 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
   }
 }
 
+function noteRecent(id) {
+  state.recentObjects = [id, ...state.recentObjects.filter((x) => x !== id)].slice(0, 20);
+  fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ recent: state.recentObjects }) }).catch(() => {});
+}
+
+const withRecent = (onPick) => (o) => { noteRecent(o.id); return onPick(o); };
+
 async function pickObject(title, showTier, onPick, attach = null, action = 'Add', group = 0) {
   const fav = (o) => state.objectFavorites.includes(o.id);
   const fresh = npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 }));
   const items = [...fresh, ...await opening(getCatalog())];
   const files = [...new Set(items.map((o) => o.file).filter((f) => f && !OFFICIAL_FILES.includes(f.toLowerCase())))];
   const mods = files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]);
-  openPicker({ title, items, types: ['Favourites', ...OBJECT_CATEGORIES], showTier, onPick,
+  openPicker({ title, items, types: ['Favourites', 'Recent', ...OBJECT_CATEGORIES], showTier, onPick: withRecent(onPick),
                attach, action, first: fav, star: { on: fav, toggle: (o) => toggleObjectFavorite(o.id) },
                groups: mods.length ? [{ label: 'Mods', options: mods }] : [] });
   $('pk-group-row').style.display = group ? '' : 'none';
@@ -1394,7 +1407,7 @@ async function pickNpc(onPick) {
   const fresh = npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 }));
   const items = [...fresh, ...(await opening(getCatalog())).filter((o) => o.type === 'NPC')];
   const files = [...new Set(items.map((o) => o.file).filter((f) => f && !OFFICIAL_FILES.includes(f.toLowerCase())))];
-  openPicker({ title: 'Place an existing NPC', items, types: ['Favourites'], onPick, first: fav,
+  openPicker({ title: 'Place an existing NPC', items, types: ['Favourites', 'Recent'], onPick: withRecent(onPick), first: fav,
                placeholder: 'Search by name or id, e.g. guard, Fargoth, trader…',
                star: { on: fav, toggle: (o) => toggleObjectFavorite(o.id) },
                groups: files.length ? [{ label: 'Mods', options: files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]) }] : [] });
@@ -1465,9 +1478,11 @@ function filterPicker() {
     }
     return sc;
   };
+  const recent = (o) => state.recentObjects.indexOf(o.id);
   const matchType = (o) => !type || (type === 'Favourites' ? picker.first && picker.first(o)
+    : type === 'Recent' ? recent(o) >= 0
     : type.startsWith('file:') ? o.file === type.slice(5) : (o.cat || o.type) === type);
-  const first = (o) => (picker.first && picker.first(o) ? 0 : 1);
+  const first = (o) => (type === 'Recent' ? recent(o) : picker.first && picker.first(o) ? 0 : 1);
   picker.items = picker.source.filter(matchType)
     .map((o) => [first(o), score(o), o]).filter(([, sc]) => sc >= 0)
     .sort((a, b) => a[0] - b[0] || a[1] - b[1] || (a[2].rank ?? 0) - (b[2].rank ?? 0)).map(([, , o]) => o);
@@ -3174,8 +3189,7 @@ window.editor = { state, camera, gizmo, proxy, THREE, aimCamera, select, loadCel
 keepAlive(() => {
   if (state.stopped) return;
   state.stopped = true;
-  showStopped(state.dirty ? 'Your unsaved changes are kept: the editor offers them back when you open this '
-                            + 'project again.' : '');
+  showStopped(state.dirty ? 'Unsaved changes are kept.' : '');
 });
 
 function openFailed(detail) {
@@ -3205,6 +3219,7 @@ function openFailed(detail) {
   live.shared = entriesOf(state.edits);
   state.favorites = state.data.favorites;
   state.objectFavorites = state.data.objectFavorites || [];
+  state.recentObjects = state.data.recentObjects || [];
   updateDirty();
   setupProject();
   buildTierControls();

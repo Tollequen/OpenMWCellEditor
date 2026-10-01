@@ -400,12 +400,26 @@ function renderProjects() {
 
 async function load() {
   home = await (await fetch('/api/home')).json();
+  if (home.remote) { remotePage(); return; }
   document.querySelectorAll('.openmw-only').forEach((b) => { b.style.display = home.cfg ? '' : 'none'; });
   renderProjects();
   restoreWizard();
   const shown = sessionStorage.getItem('ce-page');
   if (location.hash === '#project' && shown) { await openPage(shown); return; }
   show(location.hash.slice(1) || 'projects');
+}
+
+function remotePage() {
+  $('quit').style.display = 'none';
+  if (home.project) { location.href = '/'; return; }
+  const main = document.querySelector('main');
+  main.innerHTML = '';
+  main.appendChild(el('p', 'lead', 'Open a project on the host computer.'));
+  setInterval(async () => {
+    try {
+      if ((await (await fetch('/api/ping', { cache: 'no-store' })).json()).project) location.href = '/';
+    } catch (err) {}
+  }, 3000);
 }
 
 // --- Resources: the content files and folders a project uses ---------------------------------------

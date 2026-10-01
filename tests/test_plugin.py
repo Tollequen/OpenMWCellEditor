@@ -861,6 +861,40 @@ class Phone(unittest.TestCase):
         with self.assertRaises(ValueError):
             qr.encode("x" * 200)
 
+    def test_only_the_host(self):
+        """Other devices edit the open project; projects, the host's files and quitting are the host's."""
+        import threading
+        import urllib.error
+        import urllib.request
+        from celleditor import server
+        old = server.this_computer, server.LAN, server.ACCESS_CODE, server.SERVER
+        srv = server.Server(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        url = "http://127.0.0.1:%d" % srv.server_address[1]
+        server.LAN, server.ACCESS_CODE, server.SERVER = True, "ABCDEF", srv
+
+        def call(path, body=None):
+            req = urllib.request.Request(url + path, data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Cookie": "ce_code=ABCDEF"})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return r.status, json.load(r)
+            except urllib.error.HTTPError as e:
+                return e.code, json.load(e)
+        try:
+            server.this_computer = lambda address: False
+            status, home = call("/api/home")
+            self.assertEqual((status, home["remote"], "projects" in home), (200, True, False))
+            for path in ("/api/home/delete", "/api/home/browse", "/api/home/create", "/api/quit"):
+                self.assertEqual(call(path, {"path": self.id()})[0], 403, path)
+            self.assertEqual(call("/api/ping")[0], 200)
+            server.this_computer = lambda address: True
+            self.assertEqual(call("/api/home/browse", {"path": os.path.dirname(__file__)})[0], 200)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            server.this_computer, server.LAN, server.ACCESS_CODE, server.SERVER = old
+
     def test_code_tries(self):
         from celleditor import server
         server.LAN, server.ACCESS_CODE = True, "ABCDEF"

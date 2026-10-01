@@ -50,8 +50,8 @@ function showReconnecting(on, connected = true) {
 let warning = null;
 function showWarning() {
   const s = Math.max(0, Math.round((warning.end - Date.now()) / 1000));
-  warning.el.textContent = s ? `Shutting down in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}: `
-    + "the editor was closed on the host computer. Reopen it there to stay connected." : 'The editor is shutting down…';
+  warning.el.textContent = s ? `The editor closes in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}: `
+    + "it isn't open on the host." : 'The editor is closing…';
 }
 function warn(stopsIn) {
   if (stopsIn == null) {
@@ -108,9 +108,8 @@ export function showStopped(extra = '') {
   d.id = 'stopped';
   d.style.cssText = 'position:fixed;inset:0;z-index:100;background:rgba(20,21,24,.94);color:var(--text,#e4e4e7);'
     + 'display:flex;align-items:center;justify-content:center;padding:24px;font:15px/1.5 system-ui,sans-serif';
-  d.innerHTML = '<div style="max-width:440px"><div style="font-size:18px;font-weight:600;margin:0 0 10px">Can\'t reach the editor</div>'
-    + '<p style="margin:0 0 10px">It was closed on the host computer, or this device lost its connection to it. '
-    + 'This page reconnects by itself once the editor runs and can be reached.</p>'
+  d.innerHTML = '<div style="max-width:440px"><div style="font-size:18px;font-weight:600;margin:0 0 10px">Connection to host lost</div>'
+    + '<p style="margin:0 0 10px">Reconnecting…</p>'
     + '<p style="margin:0;color:var(--dim,#9ea1a8)"></p></div>';
   d.querySelector('p:last-child').textContent = extra;
   document.body.appendChild(d);

@@ -33,9 +33,9 @@ const FUNCTIONS = ['Faction reaction (lowest)', 'Faction reaction (highest)', 'R
                    'Friend hit', 'NPC fight', 'NPC hello', 'NPC alarm', 'NPC flee', 'Should attack', 'Werewolf',
                    'Player werewolf kills'];
 const MAX_TEXT = 512;
-// The game checks Greeting 0 first, then 1 and so on
-const GREETINGS = { 0: 'Greeting: looked at first (crimes, quests…)', 5: 'Greeting: most NPCs\' own',
-                    9: 'Greeting: looked at last' };
+// The game says the first greeting that fits, from Greeting 0 to 9
+const greetingLabel = (i) => (i === 5 ? "This NPC's own greeting" : i < 5 ? 'Before 5: crimes, quests, disease'
+  : 'After 5: general greetings');
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -87,7 +87,7 @@ function fillTopicList() {
     document.body.appendChild(dl);
   }
   if (dl.childElementCount) return;
-  for (let i = 0; i < 10; i++) dl.appendChild(new Option(GREETINGS[i] || 'Greeting', `Greeting ${i}`));
+  for (let i = 0; i < 10; i++) dl.appendChild(new Option(greetingLabel(i), `Greeting ${i}`));
   for (const t of names) if (t.type === 0) dl.appendChild(new Option('', t.name));
   for (const t of names) if (t.type === 3) dl.appendChild(new Option('Persuasion', t.name));
   const quests = el('datalist');
@@ -200,7 +200,7 @@ function render() {
   const topic = el('input');
   topic.type = 'text';
   topic.setAttribute('list', 'npc-topics');
-  topic.placeholder = 'Greeting 5, a topic (e.g. latest rumors), or a new topic';
+  topic.placeholder = 'Greeting 5, or a topic (e.g. latest rumors)';
   const addTopic = el('button', null, 'Add response');
   const go = () => {
     const name = topic.value.trim();
@@ -213,9 +213,15 @@ function render() {
   };
   addTopic.addEventListener('click', go);
   topic.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  topic.addEventListener('input', (e) => {
+    const picked = !e.inputType || e.inputType === 'insertReplacementText';
+    const v = topic.value.trim().toLowerCase();
+    if (picked && [...$('npc-topics').options].some((o) => o.value.toLowerCase() === v)) go();
+  });
   add.append(topic, addTopic);
   box.appendChild(add);
-  box.appendChild(el('div', 'npc-hint', 'Use Greeting 5 for unique NPC dialogue (Greetings 0–4 are reserved for crimes, quests, and disease). Variables such as %PCName, %PCRace, and %Name are replaced automatically in-game.'));
+  box.appendChild(el('div', 'npc-hint', "Greetings are tried from 0 to 9: use Greeting 5 for this NPC's own. "
+    + '%PCName and %Name become names in the game.'));
   if (ctx.focus) {
     box.querySelector(`[data-key="${CSS.escape(ctx.focus)}"] textarea`)?.focus();
     ctx.focus = null;

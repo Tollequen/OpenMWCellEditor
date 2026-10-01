@@ -499,7 +499,7 @@ def all_cells():
 
 
 def favorites():
-    """The project's favorites: {"cells": [...], "objects": [...]}; an older file is a list of cells."""
+    """The project's favorites: {"cells": [...], "objects": [...], "recent": [...]}; an older file is a list of cells."""
     path = project.file("favorites")
     f = {}
     if os.path.exists(path):
@@ -509,6 +509,7 @@ def favorites():
         f = {"cells": f}
     f.setdefault("cells", list(project.own_cells))
     f.setdefault("objects", [])
+    f.setdefault("recent", [])
     return f
 
 
@@ -561,7 +562,7 @@ def scene():
     start = project.config["start_cell"]
     start = start if start in names else next(iter(project.own_cells), None) or sorted(names)[0]
     return {"project": info(), "cells": all_cells(), "own": list(project.own_cells), "favorites": fav["cells"],
-            "objectFavorites": fav["objects"], "startCell": start, "nooks": nooks,
+            "objectFavorites": fav["objects"], "recentObjects": fav["recent"], "startCell": start, "nooks": nooks,
             "edits": edits, "live": LIVE.state(), "orphans": orphans, "notice": _take_notice(),
             "hasThumb": os.path.exists(_thumb_file(project.path, ".jpg"))}
 
@@ -865,12 +866,17 @@ def revert(name, key=None):
     return save(cur, label="reverted")
 
 
+RECENT = 20
+
+
 def save_favorites(body):
     fav = favorites()
     if "favorites" in body:
         fav["cells"] = body["favorites"]
     if "objects" in body:
         fav["objects"] = body["objects"]
+    if "recent" in body:
+        fav["recent"] = body["recent"][:RECENT]
     with open(project.file("favorites"), "w") as f:
         json.dump(fav, f, indent=1)
 
@@ -1039,6 +1045,8 @@ class Handler(SimpleHTTPRequestHandler):
                     pass
             return self.reply(data, "image/jpeg") if data else self.reply(b"{}", code=404)
         if u.path == "/api/home":
+            if not self.here():
+                return self.reply(json.dumps({"remote": True, "project": project and project.name}).encode())
             try:
                 return self.reply(json.dumps(home_info()).encode())
             except Exception:
@@ -1052,7 +1060,7 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/live":
                 return self.stream(q.get("page") or "")
             if u.path == "/api/scene":
-                return self.reply(json.dumps(scene()).encode())
+                return self.reply(json.dumps(dict(scene(), here=self.here())).encode())
             if u.path == "/api/cell":
                 return self.reply(json.dumps(cell_data(q["name"])).encode())
             if u.path == "/api/terrain":
@@ -1160,6 +1168,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "/api/home/browse": lambda: launcher.browse(body.get("path"), body.get("want")),
                     "/api/home/privacy": open_privacy_settings,
                     "/api/home/restart": restart}
+            if (u.path in home or u.path == "/api/quit") and not self.here():
+                return self.reply(b'{"ok": false, "message": "Only on the host computer."}', code=403)
             if u.path in home:
                 try:
                     return self.reply(json.dumps(dict({"ok": True}, **home[u.path]())).encode())
