@@ -264,8 +264,10 @@ const placeholders = {
   light: [new THREE.SphereGeometry(8, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd060 })],
   marker: [new THREE.BoxGeometry(16, 16, 16), new THREE.MeshBasicMaterial({ color: 0xd050d0, wireframe: true })],
 };
+// which way a marker faces (its local +y), e.g. where an NPC put on it will look
+const markerArrow = new THREE.ConeGeometry(5, 18, 3).translate(0, 19, 0);
 
-// Reference rotations are clockwise and applied Z * Y * X.
+// Reference rotations are clockwise; OpenMW turns an object about z first, then y, then x.
 function refMatrix(r) {
   const [rx, ry, rz] = r.rot;
   const s = r.scale;
@@ -274,7 +276,7 @@ function refMatrix(r) {
   const Ry = [[c(ry), 0, -n(ry)], [0, 1, 0], [n(ry), 0, c(ry)]];
   const Rz = [[c(rz), n(rz), 0], [-n(rz), c(rz), 0], [0, 0, 1]];
   const mul = (A, B) => A.map((row, i) => B[0].map((_, j) => row.reduce((acc, _v, k) => acc + A[i][k] * B[k][j], 0)));
-  const M = mul(mul(Rz, Ry), Rx);
+  const M = mul(mul(Rx, Ry), Rz);            // as OpenMW: turned about z first, then y, then x (makeOsgQuat)
   return new THREE.Matrix4().set(
     M[0][0] * s, M[0][1] * s, M[0][2] * s, r.pos[0],
     M[1][0] * s, M[1][1] * s, M[1][2] * s, r.pos[1],
@@ -289,9 +291,9 @@ function rotOf(m) {
   const e = m.elements;                         // three.js matrices are column-major: e[c * 4 + r]
   const at = (r, c) => e[c * 4 + r];
   const clean = (v) => (Math.abs(v) < 1e-6 ? 0 : v);
-  const b = Math.asin(Math.max(-1, Math.min(1, at(2, 0))));
-  const a = Math.atan2(-at(2, 1), at(2, 2));
-  const g = Math.atan2(-at(1, 0), at(0, 0));
+  const b = Math.asin(Math.max(-1, Math.min(1, -at(0, 2))));
+  const a = Math.atan2(at(1, 2), at(2, 2));
+  const g = Math.atan2(at(0, 1), at(0, 0));
   return [clean(a), clean(b), wrapAngle(clean(g))];
 }
 
@@ -330,6 +332,7 @@ async function fillObject(obj) {
   if (obj.children.length === 0) {
     const [g, m] = placeholders[r.kind === 'mesh' ? 'marker' : r.kind];
     obj.add(new THREE.Mesh(g, m));
+    if (r.kind === 'marker') obj.add(new THREE.Mesh(markerArrow, m));
   }
   applyTransform(obj);
 }
@@ -409,9 +412,11 @@ async function loadCell(name, keepCamera = false) {
     }
   }
   if (!keepCamera) {
-    camera.position.set(...cell.start.pos);
-    state.yaw = cell.start.yaw;
-    state.pitch = cell.start.pitch ?? -0.3;
+    // where the camera was the last time in this cell, else the cell's start
+    const v = state.data.views?.cells?.[name] || cell.start;
+    camera.position.set(...v.pos);
+    state.yaw = v.yaw;
+    state.pitch = v.pitch ?? -0.3;
   }
   camera.far = cell.grid ? 60000 : 30000;
   camera.updateProjectionMatrix();
@@ -1378,7 +1383,7 @@ $('sel-tier').addEventListener('change', () => {
 });
 
 async function openPicker({ title, items, types, placeholder, showTier = false, onPick, first = null, star = null,
-                            attach = null, action = null, groups = [] }) {
+                            attach = null, action = null, groups = [], remember = null }) {
   if (document.pointerLockElement) document.exitPointerLock();
   closeMenu();
   $('pk-title').textContent = title;
@@ -1395,6 +1400,10 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
     for (const [value, label] of g.options) og.appendChild(new Option(label, value));
     type.appendChild(og);
   }
+  // remember: a name to keep the chosen type under, so the picker opens on it again
+  picker.remember = remember && 'ce-pk-type-' + remember;
+  const last = picker.remember && stored(picker.remember);
+  if (last && [...type.options].some((o) => o.value === last)) type.value = last;
   if (modTiers) { tierChoices(); updatePickerModSummary(); } else $('pk-tier').innerHTML = '';
   picker.source = items;
   picker.onPick = onPick;
@@ -1430,7 +1439,7 @@ async function pickObject(title, showTier, onPick, attach = null, action = 'Add'
   const mods = files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]);
   openPicker({ title, items, types: ['Favourites', 'Recent', ...OBJECT_CATEGORIES], showTier, onPick: withRecent(onPick),
                attach, action, first: fav, star: { on: fav, toggle: (o) => toggleObjectFavorite(o.id) },
-               groups: mods.length ? [{ label: 'Mods', options: mods }] : [] });
+               groups: mods.length ? [{ label: 'Mods', options: mods }] : [], remember: 'objects' });
   $('pk-group-row').style.display = group ? '' : 'none';
   $('pk-group').checked = true;
   $('pk-group-label').textContent = `Add to the group (${group} objects)`;
@@ -1555,7 +1564,10 @@ function pick(o) {
 }
 
 $('pk-search').addEventListener('input', filterPicker);
-$('pk-type').addEventListener('change', filterPicker);
+$('pk-type').addEventListener('change', () => {
+  if (picker.remember) try { localStorage.setItem(picker.remember, $('pk-type').value); } catch (err) { /* private mode */ }
+  filterPicker();
+});
 $('pk-cancel').addEventListener('click', closePicker);
 $('picker').addEventListener('click', (e) => { if (e.target === $('picker')) closePicker(); });
 $('pk-search').addEventListener('keydown', (e) => {
@@ -2744,7 +2756,9 @@ $('reset').addEventListener('click', resetSelected);
 
 async function save() {
   if (busy) { status(busy); return; }
-  if (!state.dirty) { status('Nothing to save: no changes since the last save.'); return; }
+  // nothing changed: still offer to write the file, for when what it's made from changed outside the editor
+  if (!state.dirty && !confirm(`Nothing has changed since the last save. Write ${state.data.project.plugin} again `
+                               + 'anyway? (For when the files it is made from have changed.)')) return;
   setBusy('Saving…');
   try {
     await flushAll();
@@ -3114,12 +3128,16 @@ function trimUndo(ids) {
 }
 
 function sendWhere(now) {
-  if (!live.ready || !state.cell || now - live.whereAt < 250) return;
+  if (!live.ready || !state.cell || state.loadingCell || now - live.whereAt < 250) return;
   const info = { label: DEVICE, cell: state.cell.name, pos: camera.position.toArray().map(Math.round),
                  yaw: Math.round(state.yaw * 1000) / 1000, pitch: Math.round(state.pitch * 1000) / 1000,
                  sel: state.selection.map((o) => o.userData.ref.key), tiers: state.tiers };
   const json = JSON.stringify(info);
   if (json === live.lastWhere) return;
+  if (state.data.views) {
+    state.data.views.cells[info.cell] = { pos: info.pos, yaw: info.yaw, pitch: info.pitch };
+    state.data.views.last = info.cell;
+  }
   live.lastWhere = json;
   live.whereAt = now;
   fetch('/api/live/where', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3335,8 +3353,9 @@ function openFailed(detail) {
   updateDirty();
   setupProject();
   buildTierControls();
-  const last = stored('ce-last-cell');
-  await loadCell(last && state.data.cells.some((c) => c.name === last) ? last : state.data.startCell);
+  const known = (c) => c && state.data.cells.some((x) => x.name === c);
+  const last = [state.data.views?.last, stored('ce-last-cell')].find(known);
+  await loadCell(last || state.data.startCell);
   offerDraft();
   connectLive();
   if (!state.data.hasThumb) setTimeout(() => sendPicture(false), 3000);

@@ -7,7 +7,8 @@ _cache = {}
 
 
 def rot_matrix(rot):
-    """A reference's rotation as rows of a 3x3 matrix (clockwise, applied Z * Y * X, as the game does)."""
+    """A reference's rotation as rows of a 3x3 matrix: clockwise, turned about z first, then y, then x, as
+    OpenMW does (Misc::Convert::makeOsgQuat)."""
     rx, ry, rz = rot
     c, s = math.cos, math.sin
     Rx = ((1, 0, 0), (0, c(rx), s(rx)), (0, -s(rx), c(rx)))
@@ -16,7 +17,7 @@ def rot_matrix(rot):
 
     def mul(A, B):
         return tuple(tuple(sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3)) for i in range(3))
-    return mul(mul(Rz, Ry), Rx)
+    return mul(mul(Rx, Ry), Rz)
 
 
 def to_world(r, v):

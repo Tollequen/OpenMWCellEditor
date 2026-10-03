@@ -201,11 +201,13 @@ def shapes(d):
         if blocks.get(pr):
             props[blocks[pr]['type']] = blocks[pr]
     if 'children' in root:
+        # OpenMW drops a root node's own transform, except Bip01's (components/nif/node.cpp, NiNode::read)
+        M, t, s = (root['R'], root['t'], root['s']) if root.get('name', b'').lower() == b'bip01' \
+            else (I3, (0.0, 0.0, 0.0), 1.0)
         for c in root['children']:
             if c >= 0:
-                walk(c, I3, (0.0, 0.0, 0.0), 1.0, props)
+                walk(c, M, t, s, props)
     elif 'data' in root:
-        root = dict(root, t=(0.0, 0.0, 0.0), R=I3, s=1.0)
-        blocks[0] = root
+        # a mesh that is only a shape keeps its transform (e.g. contain_crate_01, 32 below its origin)
         walk(0, I3, (0.0, 0.0, 0.0), 1.0, {})
     return out

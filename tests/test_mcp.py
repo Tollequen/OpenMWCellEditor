@@ -62,12 +62,31 @@ class Geometry(unittest.TestCase):
         self.assertAlmostEqual(p[0], 1.0)
         self.assertAlmostEqual(p[1], 0.0)
 
+    def test_rotation_order_is_openmws(self):
+        # OpenMW turns about z first, then x: front (+y), heading 90 then 90 about x, ends up east, not down
+        p = geometry.to_world({"pos": (0, 0, 0), "rot": (math.pi / 2, 0, math.pi / 2)}, (0, 1, 0))
+        self.assertAlmostEqual(p[0], 1.0)
+        self.assertAlmostEqual(p[2], 0.0)
+
     def test_raycast(self):
         r = {"pos": (1000, 0, 0), "rot": (0, 0, 0.3), "scale": 2.0}
         h = geometry.raycast([(r, self.box())], (1000, 0, 500), (0, 0, -1))
         self.assertAlmostEqual(h["point"][2], 200.0, places=3)
         self.assertAlmostEqual(h["normal"][2], 1.0, places=3)
         self.assertIsNone(geometry.raycast([(r, self.box())], (0, 0, 500), (0, 0, -1)))
+
+    def test_shape_root_keeps_its_transform(self):
+        # OpenMW drops a root node's transform but keeps a root shape's: the crate is 32 below its origin
+        from celleditor import nif
+        from celleditor.gamedata import GameData
+        try:
+            data = GameData.from_cfg().read("meshes\\o\\contain_crate_01.nif")
+        except FileNotFoundError:
+            data = None
+        if not data:
+            self.skipTest("no game data")
+        zs = [v for s in nif.shapes(data) for v in s["pos"][2::3]]
+        self.assertEqual((round(min(zs)), round(max(zs))), (-32, 32))
 
     def test_terrain(self):
         h = geometry.terrain_hit(lambda x, y: x * 0.5, (0, 0, 100), (1, 0, 0))

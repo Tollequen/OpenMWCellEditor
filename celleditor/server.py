@@ -155,6 +155,70 @@ def thumb_info(path):
             "cell": note.get("cell"), "savedAt": note.get("savedAt")}
 
 
+# --- Where the camera was in each cell, so the editor continues from there ---------------
+
+_views = {"path": None, "data": None, "timer": None}
+_views_lock = threading.Lock()
+
+
+def _views_of(path):
+    """{"last": cell, "cells": {cell: {pos, yaw, pitch}}} for a project (kept in memory, written soon after)."""
+    if _views["path"] != path:
+        _write_views()
+        try:
+            with open(_thumb_file(path, ".views.json")) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        data.setdefault("cells", {})
+        _views.update(path=path, data=data)
+    return _views["data"]
+
+
+def remember_view(info):
+    """A page on this computer moved: remember its camera for its cell."""
+    cell, pos = info.get("cell"), info.get("pos")
+    if not (project and cell and isinstance(pos, list) and len(pos) == 3):
+        return
+    with _views_lock:
+        data = _views_of(project.path)
+        cells = data["cells"]
+        cells.pop(cell, None)
+        cells[cell] = {"pos": [round(float(v)) for v in pos], "yaw": float(info.get("yaw") or 0),
+                       "pitch": float(info.get("pitch") or 0)}
+        while len(cells) > 50:                         # the 50 cells visited last
+            cells.pop(next(iter(cells)))
+        data["last"] = cell
+        if _views["timer"] is None:
+            _views["timer"] = threading.Timer(2.0, lambda: _write_views(True))
+            _views["timer"].daemon = True
+            _views["timer"].start()
+
+
+def _write_views(locked=False):
+    if locked:
+        with _views_lock:
+            return _write_views()
+    if _views["timer"] is not None:
+        _views["timer"].cancel()
+        _views["timer"] = None
+    if not _views["path"] or _views["data"] is None:
+        return
+    path = _thumb_file(_views["path"], ".views.json")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w") as f:
+            json.dump(_views["data"], f)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def views():
+    with _views_lock:
+        return _views_of(project.path)
+
+
 def _read_project(path):
     path = _clean_path(path)
     if os.path.isdir(path):
@@ -564,7 +628,7 @@ def scene():
     start = start if start in names else next(iter(project.own_cells), None) or sorted(names)[0]
     return {"project": info(), "cells": all_cells(), "own": list(project.own_cells), "favorites": fav["cells"],
             "objectFavorites": fav["objects"], "recentObjects": fav["recent"], "startCell": start, "nooks": nooks,
-            "edits": edits, "live": LIVE.state(), "orphans": orphans, "notice": _take_notice(),
+            "edits": edits, "live": LIVE.state(), "orphans": orphans, "notice": _take_notice(), "views": views(),
             "hasThumb": os.path.exists(_thumb_file(project.path, ".jpg"))}
 
 
@@ -1178,6 +1242,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(b'{"ok": true}')
             if u.path == "/api/live/where":
                 LIVE.where(body.get("page"), body)
+                if self.here():
+                    remember_view(body)
                 return self.reply(b'{"ok": true}')
             if u.path == "/api/thumb":
                 return self.reply(json.dumps(dict({"ok": True}, **save_thumb(body.get("data"), body.get("cell"),
@@ -1468,6 +1534,7 @@ def run(p=None, port=8765, lan=False, browser=True, code=None, game=None, settin
             threading.Thread(target=SERVER.shutdown, daemon=True).start()
             serving.join(10)
             LIVE.close()
+            _write_views(True)
         return
     if browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()
@@ -1478,6 +1545,7 @@ def run(p=None, port=8765, lan=False, browser=True, code=None, game=None, settin
         _serve(port)
     finally:
         LIVE.close()
+        _write_views(True)
 
 
 def _serve(port):
