@@ -3131,7 +3131,7 @@ function leaving() {
 }
 $('group').addEventListener('click', groupButton);
 $('delete').addEventListener('click', removeSelected);
-$('duplicate').addEventListener('click', duplicateSelected);
+$('duplicate').addEventListener('click', () => duplicateSelected());
 $('undo').addEventListener('click', undo);
 $('redo').addEventListener('click', redo);
 $('save').addEventListener('click', save);
