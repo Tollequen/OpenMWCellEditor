@@ -2756,9 +2756,8 @@ $('reset').addEventListener('click', resetSelected);
 
 async function save() {
   if (busy) { status(busy); return; }
-  // nothing changed: still offer to write the file, for when what it's made from changed outside the editor
-  if (!state.dirty && !confirm(`Nothing has changed since the last save. Write ${state.data.project.plugin} again `
-                               + 'anyway? (For when the files it is made from have changed.)')) return;
+  // with no changes it still writes the file again: what it's made from may have changed outside the editor
+  const changed = state.dirty;
   setBusy('Saving…');
   try {
     await flushAll();
@@ -2770,7 +2769,7 @@ async function save() {
     updateDirty();
     sendPicture(true);
     setBusy(null);
-    status(`Saved: ${out.moved} moved, ${out.added} added, ${out.replaced} swapped, ${out.deleted} deleted`
+    status((changed ? 'Saved' : 'No changes; written again') + `: ${out.moved} moved, ${out.added} added, ${out.replaced} swapped, ${out.deleted} deleted`
            + `${out.doors ? `, ${out.doors} door${out.doors > 1 ? 's' : ''} redirected` : ''}`
            + `${out.npcs ? `, ${out.npcs} NPC${out.npcs > 1 ? 's' : ''} changed or new` : ''}`
            + `${out.responses ? `, ${out.responses} response${out.responses > 1 ? 's' : ''} changed or new` : ''}.\n`
