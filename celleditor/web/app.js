@@ -13,6 +13,13 @@ fillIcons();
 function stored(key) {
   try { return localStorage.getItem(key); } catch (err) { return null; }
 }
+// for this session (this tab) only
+function storedNow(key) {
+  try { return sessionStorage.getItem(key); } catch (err) { return null; }
+}
+function storeNow(key, value) {
+  try { sessionStorage.setItem(key, value); } catch (err) { /* private mode */ }
+}
 const MOVE_STEPS = [1, 2, 4, 8, 16, 32];
 const ROT_STEPS = [1, 5, 15, 45, 90];
 const DEG = Math.PI / 180;
@@ -1581,17 +1588,20 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
     type.appendChild(og);
   }
   // remember: a name to keep the chosen type and the last object picked under, so the picker opens on them again
+  // (in this session, as the search text is kept)
   picker.remember = remember && 'ce-pk-type-' + remember;
   picker.lastKey = remember && 'ce-pk-last-' + remember;
-  const last = picker.remember && stored(picker.remember);
+  const last = picker.remember && storedNow(picker.remember);
   if (last && [...type.options].some((o) => o.value === last)) type.value = last;
   if (modTiers) { tierChoices(); updatePickerModSummary(); } else $('pk-tier').innerHTML = '';
   picker.source = items;
   picker.onPick = onPick;
   picker.first = first;
   picker.star = star;
+  // attach: the object it would be attached to, or true when that is where it is placed later
   $('pk-attach-row').style.display = attach ? '' : 'none';
-  if (attach) $('pk-attach-label').textContent = `Attach to ${attach}`;
+  $('pk-attach-row').title = attach === true ? 'It moves with the object it is placed on'
+    : attach ? `It moves with ${attach}` : '';
   $('pk-box').classList.toggle('with-preview', !!action);
   $('pk-type-label').textContent = action ? 'Category' : 'Type';
   if (action) $('pk-pv-use').textContent = action;
@@ -1667,12 +1677,15 @@ function closePicker() {
 // 60, so a model grid (up to 6 columns) keeps its columns when rows are added above.
 const PICKER_ROWS = 240;
 const gridView = () => picker.grid && previewing();
+// the preview beside the list (on a touch screen the grid shows the models without it)
+const previewShown = () => previewing() && getComputedStyle($('pk-preview')).display !== 'none';
 const rowAt = (i) => $('pk-list').children[i - picker.start];
 
 function renderPicker(at = 0) {
   const list = $('pk-list');
   list.innerHTML = '';
   list.classList.toggle('grid', gridView());
+  $('pk-box').classList.toggle('grid-view', gridView());
   list.scrollTop = 0;
   $('pk-view-list').classList.toggle('on', !gridView());
   $('pk-view-grid').classList.toggle('on', gridView());
@@ -1749,7 +1762,7 @@ function pickerRow(o, i) {
     st.addEventListener('click', async (e) => { e.stopPropagation(); await picker.star.toggle(o); paint(); paintPreviewStar(); });
     row.appendChild(st);
   }
-  row.addEventListener('click', () => (TOUCH && picker.sel !== i && previewing() ? highlight(i) : pick(o)));
+  row.addEventListener('click', () => (TOUCH && picker.sel !== i && previewShown() ? highlight(i) : pick(o)));
   row.addEventListener('mouseenter', () => { if (!TOUCH) showPreview(o); });
   return row;
 }
@@ -1776,21 +1789,21 @@ function filterPicker(atLast = false) {
   picker.items = picker.source.filter(matchType)
     .map((o) => [first(o), score(o), o]).filter(([, sc]) => sc >= 0)
     .sort((a, b) => a[0] - b[0] || a[1] - b[1] || (a[2].rank ?? 0) - (b[2].rank ?? 0)).map(([, , o]) => o);
-  const last = atLast && picker.lastKey && stored(picker.lastKey);
+  const last = atLast && picker.lastKey && storedNow(picker.lastKey);
   renderPicker(last ? Math.max(0, picker.items.findIndex((o) => o.id === last)) : 0);
 }
 
 function pick(o) {
   const fn = picker.onPick;
   if ($('pk-tier').options.length) picker.tier = $('pk-tier').value;
-  if (picker.lastKey) try { localStorage.setItem(picker.lastKey, o.id); } catch (err) { /* private mode */ }
+  if (picker.lastKey) storeNow(picker.lastKey, o.id);
   closePicker();
   if (fn) fn(o);
 }
 
 $('pk-search').addEventListener('input', () => filterPicker());
 $('pk-type').addEventListener('change', () => {
-  if (picker.remember) try { localStorage.setItem(picker.remember, $('pk-type').value); } catch (err) { /* private mode */ }
+  if (picker.remember) storeNow(picker.remember, $('pk-type').value);
   filterPicker(true);
 });
 for (const view of ['list', 'grid']) {
@@ -1990,7 +2003,7 @@ function setupPreview() {
 }
 
 async function showPreview(o) {
-  if (!previewing() || !o || preview.shown === o) return;
+  if (!previewShown() || !o || preview.shown === o) return;
   setupPreview();
   preview.shown = o;
   $('pk-pv-name').textContent = o.name || o.id;
@@ -2124,7 +2137,7 @@ function addAt(hit, kind = 'object', preset = null) {
   };
   if (preset) { put(preset.o, preset.opts).then(() => preset.then?.()); return; }
   if (kind === 'npc') { newNpc(put); return; }
-  pickObject('Add object', true, put, baseRef ? `"${baseRef.src}" (moves with it)` : null, 'Add',
+  pickObject('Add object', true, put, baseRef ? baseRef.src : null, 'Add',
              group ? state.edits.groups[group].length : 0);
 }
 
@@ -2180,7 +2193,7 @@ function addObject() {
   stopPlacing();
   const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
   pickObject('Add object', true, (o) => startPlacing('object', { o, opts: pickedOptions() }),
-             'the object it is placed on (moves with it)', 'Add', group ? state.edits.groups[group].length : 0);
+             true, 'Add', group ? state.edits.groups[group].length : 0);
 }
 
 // Add NPC…: a new NPC (or one chosen from the load order), then where they stand.
@@ -3207,9 +3220,142 @@ function setDock(v) {
   try { localStorage.setItem('ce-dock', $('dock').value); } catch (err) { /* private mode */ }
   resize();
 }
-setDock(stored('ce-dock') || 'dock');
+setDock(stored('ce-dock') || 'float');
 setLayout('new');
 $('dock').addEventListener('change', () => { setDock($('dock').value); $('dock').blur(); });
+
+// --- Floating sections -------------------------------------------------------------
+// A section's title dragged out of the panel makes it a window of its own, kept where it was left (also while the
+// panel is hidden). Dropped back on the panel, or with Back to the panel in its ⋯ menu, it returns to its place.
+
+const FLOAT_SECTIONS = ['n-add', 'sec-selected', 'n-view', 'n-project'];
+const floatHome = new Map();
+let secMenuFor = null;
+
+function saveFloating() {
+  const out = {};
+  for (const id of FLOAT_SECTIONS) {
+    const el = $(id);
+    if (el.classList.contains('floating')) out[id] = { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
+  }
+  try { localStorage.setItem('ce-sections', JSON.stringify(out)); } catch (err) { /* private mode */ }
+}
+
+// keeps the title on screen
+function placeFloating(el, x, y) {
+  el.style.left = Math.round(Math.max(0, Math.min(x, window.innerWidth - el.offsetWidth))) + 'px';
+  el.style.top = Math.round(Math.max(0, Math.min(y, window.innerHeight - el.querySelector('h3').offsetHeight - 16))) + 'px';
+  el.style.maxHeight = `calc(100% - ${el.style.top} - 10px)`;      // a taller section scrolls inside
+}
+
+function floatSection(el, x, y) {
+  if (!floatHome.has(el.id)) {
+    const mark = document.createComment(el.id);
+    el.before(mark);
+    floatHome.set(el.id, mark);
+  }
+  if (!el.classList.contains('floating')) {
+    document.body.appendChild(el);
+    el.classList.add('floating');
+    el.querySelector('h3').title = 'Drag to move; drop it on the panel to put it back';
+  }
+  placeFloating(el, x, y);
+}
+
+function dockSection(el) {
+  if (!el.classList.contains('floating')) return;
+  floatHome.get(el.id).after(el);
+  el.classList.remove('floating');
+  el.style.left = el.style.top = el.style.maxHeight = '';
+  el.querySelector('h3').title = 'Drag out of the panel to make it a window of its own';
+}
+
+const overPanel = (e) => {
+  if (document.body.classList.contains('panel-hidden')) return false;
+  const r = $('panel').getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+};
+
+function setupFloating() {
+  if (TOUCH) return;                      // on a touch screen the panel is a sheet
+  for (const id of FLOAT_SECTIONS) {
+    const el = $(id), h3 = el.querySelector('h3');
+    el.classList.add('detachable');
+    h3.title = 'Drag out of the panel to make it a window of its own';
+    const more = document.createElement('button');
+    more.className = 'ghost icon sec-more';
+    more.title = 'Window menu';
+    more.innerHTML = icon('more');
+    more.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const m = $('sec-menu'), r = more.getBoundingClientRect();
+      secMenuFor = el;
+      m.classList.add('open');
+      m.style.left = Math.min(r.left, window.innerWidth - m.offsetWidth - 6) + 'px';
+      m.style.top = (r.bottom + 4) + 'px';
+    });
+    h3.appendChild(more);
+    h3.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+      let moving = false;
+      e.preventDefault();
+      // on the window: moving the section out of the panel would end a pointer capture
+      const move = (ev) => {
+        if (ev.pointerId !== e.pointerId) return;
+        if (!moving && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 6) return;
+        if (!moving) {
+          moving = true;
+          floatSection(el, r.left, r.top);
+          el.classList.add('dragging');
+        }
+        placeFloating(el, ev.clientX - dx, ev.clientY - dy);
+        $('panel').classList.toggle('drop-here', overPanel(ev));
+      };
+      const end = (ev) => {
+        if (ev.pointerId !== e.pointerId) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        if (!moving) return;
+        if (ev.type === 'pointerup') placeFloating(el, ev.clientX - dx, ev.clientY - dy);
+        el.classList.remove('dragging');
+        $('panel').classList.remove('drop-here');
+        if (ev.type === 'pointerup' && overPanel(ev)) dockSection(el);
+        saveFloating();
+        resize();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+    });
+  }
+  let places = {};
+  try { places = JSON.parse(stored('ce-sections') || '{}'); } catch (err) { /* none kept */ }
+  for (const [id, p] of Object.entries(places)) {
+    if (FLOAT_SECTIONS.includes(id) && Number.isFinite(p.x) && Number.isFinite(p.y)) floatSection($(id), p.x, p.y);
+  }
+  window.addEventListener('resize', () => {
+    for (const id of FLOAT_SECTIONS) {
+      const el = $(id);
+      if (el.classList.contains('floating')) placeFloating(el, parseFloat(el.style.left), parseFloat(el.style.top));
+    }
+  });
+  window.addEventListener('pointerdown', (e) => {
+    if ($('sec-menu').classList.contains('open') && !e.target.closest('#sec-menu')) $('sec-menu').classList.remove('open');
+  }, true);
+  $('sec-dock').addEventListener('click', () => {
+    $('sec-menu').classList.remove('open');
+    if (secMenuFor) dockSection(secMenuFor);
+    saveFloating();
+  });
+  $('sec-dock-all').addEventListener('click', () => {
+    $('sec-menu').classList.remove('open');
+    for (const id of FLOAT_SECTIONS) dockSection($(id));
+    saveFloating();
+  });
+}
+setupFloating();
 
 function showGuide() {
   if (document.querySelector('.dialog-bg')) return;

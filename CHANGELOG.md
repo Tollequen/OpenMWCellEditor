@@ -4,11 +4,14 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 
 ## [Unreleased]
 
+- **Sections as windows**: drag a panel section's title (Add to the cell, Selected, View, Project) out of the panel to make it a window of its own, placed anywhere and kept there, also while the panel is hidden. Drop it back on the panel, or use Back to the panel in its ⋯ menu, to return it.
+- **Floating panel by default**: the panel floats over the view unless Settings → Panel says Docked.
 - **New panel layout**: the panel in sections: Save beside undo and redo (blue while there are unsaved changes), Add to the cell, the selected object with Move / Rotate / Scale and its actions, View switches (Lock walls, Simulate lighting) and the project.
 - **Simulate lighting**: a button next to Lock walls lights the cell as OpenMW does: the cell's ambient and sunlight, and each light's colour and radius with the falloff from openmw.cfg. Lights update as they are moved, added or removed. Exteriors show a clear night.
 - **Choose first, then place**: Add object… opens the object list at once, and Add NPC… names the new NPC (or picks an existing one) first; it is placed where you click next.
 - **Restoring unsaved changes can be undone**: after Restore changes, Undo goes back to the saved plugin.
-- **Back where you were**: the object list opens on the object picked last time (as well as the category).
+- **Back where you were**: the object list opens on the category and the object picked last, until the editor is closed (as the search text).
+- **Object list on phones**: the model grid shows no preview pane (a tap adds the object); on its side, the search and options are beside the list. The attach option reads "Attach to the object below".
 - **Model grid**: the object list can show the models as pictures (the list and grid buttons next to Category).
 - **NPCs aren't duplicated**: Duplicate skips NPCs (it would place the same NPC twice); Copy as new NPC… makes a separate one.
 - **Copy as new NPC**: one undo step for the new NPC and its placement; copies of upgrade-tier NPCs save correctly.
