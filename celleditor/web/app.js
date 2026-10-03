@@ -2725,7 +2725,27 @@ window.addEventListener('mousemove', (e) => {
   state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - e.movementY * k));
   aimCamera();
 });
-canvas.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+// The wheel moves the camera forward and back (as W and S do): a notch goes 15% of the way to what is under the
+// pointer, so close up it takes small steps and in a wide view big ones. The distance is measured at most every
+// 200 ms (a trackpad sends many small scrolls).
+const wheel = { at: 0, dist: 600 };
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (gizmo.dragging) return;
+  const notches = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY * 10 : e.deltaY / 100;
+  if (!notches) return;
+  const now = performance.now();
+  if (now - wheel.at > 200) {
+    const hit = surfaceAt(...(state.mouseLook ? [0, 0] : ndc(e.clientX, e.clientY)));
+    wheel.dist = hit ? hit.distance : 600;
+    wheel.at = now;
+  }
+  let move = -notches * Math.min(800, Math.max(8, wheel.dist * 0.15));
+  if (move > 0) move = Math.min(move, wheel.dist * 0.5);      // not through what is in front
+  wheel.dist = Math.max(0, wheel.dist - move);
+  camera.position.addScaledVector(viewDir(), move);
+  aimCamera();
+}, { passive: false });
 
 window.addEventListener('keydown', (e) => {
   if ((e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') || e.target.tagName === 'SELECT') return;
@@ -3371,6 +3391,7 @@ function showGuide() {
     ['Save', 'In the bottom bar'],
   ] : [
     [keys('W', 'A', 'S', 'D'), `Fly; ${keys('Q')} down, ${keys('E')} up; Shift faster`],
+    ['Scroll', 'Move forward or back'],
     ['Right mouse', `Hold to look around; Fly mode (${keys('Tab')} or top right): look around with the mouse`],
     ['Click', 'Select an object, then drag the arrows to move it'],
     ['Right click', 'Quick menu: add object, actions, etc. (or Add object… in the panel)'],

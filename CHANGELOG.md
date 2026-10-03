@@ -4,6 +4,7 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 
 ## [Unreleased]
 
+- **Scroll to move forward and back**: the mouse wheel or trackpad scroll moves the camera, in steps that grow with the distance to what is under the pointer.
 - **Sections as windows**: drag a panel section's title (Add to the cell, Selected, View, Project) out of the panel to make it a window of its own, placed anywhere and kept there, also while the panel is hidden. Drop it back on the panel, or use Back to the panel in its ⋯ menu, to return it.
 - **Floating panel by default**: the panel floats over the view unless Settings → Panel says Docked.
 - **New panel layout**: the panel in sections: Save beside undo and redo (blue while there are unsaved changes), Add to the cell, the selected object with Move / Rotate / Scale and its actions, View switches (Lock walls, Simulate lighting) and the project.

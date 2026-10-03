@@ -68,6 +68,7 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
 | Fly forward / back / left / right | `W` `A` `S` `D` |
 | Elevation (up / down) | `E` / `Q` |
 | Fly faster | `Shift` (hold) |
+| Move forward / back | Scroll wheel |
 | Free-look camera | Right-click + Drag (or `Tab` for Fly Mode) |
 | Quick Action Menu | Right-click (without dragging) |
 | Toggle Fly Mode | `Tab` |
