@@ -4,6 +4,7 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 
 ## [Unreleased]
 
+- **New panel layout**: the panel in sections: Save beside undo and redo (blue while there are unsaved changes), Add to the cell, the selected object with Move / Rotate / Scale and its actions, View switches (Lock walls, Simulate lighting) and the project.
 - **Simulate lighting**: a button next to Lock walls lights the cell as OpenMW does: the cell's ambient and sunlight, and each light's colour and radius with the falloff from openmw.cfg. Lights update as they are moved, added or removed. Exteriors show a clear night.
 - **Choose first, then place**: Add object… opens the object list at once, and Add NPC… names the new NPC (or picks an existing one) first; it is placed where you click next.
 - **Restoring unsaved changes can be undone**: after Restore changes, Undo goes back to the saved plugin.

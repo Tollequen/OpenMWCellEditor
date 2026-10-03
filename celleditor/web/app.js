@@ -5,7 +5,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { decodeTexture } from './textures.js';
 import { keepAlive, showStopped } from './alive.js';
 import { phoneButton } from './phone.js';
-import { icon, fillIcons } from './icons.js';
+import { icon, iconMask, fillIcons } from './icons.js';
 import { setupNpcEditor } from './npc.js';
 
 const $ = (id) => document.getElementById(id);
@@ -997,13 +997,13 @@ function updateButtons() {
   const objs = state.selection.filter((o) => o.visible && o.userData.ref.editable);
   const attached = objs.length > 0 && objs.every((o) => state.edits.attached[o.userData.ref.key]);
   $('attach').disabled = !objs.length;
-  $('attach').textContent = attached ? 'Detach' : 'Attach to object below';
+  $('attach').textContent = attached ? 'Detach' : newLayout() ? 'Attach' : 'Attach to object below';
   $('attach').title = attached ? 'Stop moving with object below (B)'
     : 'Attach to whatever this stands on (table, shelf, etc.), so moving that object carries this along (B)';
   const a = groupAction();
   $('group').disabled = !a;
-  $('group').textContent = { group: 'Group together', ungroup: 'Ungroup',
-                             remove: 'Remove from group' }[a] || 'Group together';
+  $('group').textContent = (newLayout() ? { group: 'Group', ungroup: 'Ungroup', remove: 'Leave group' }
+    : { group: 'Group together', ungroup: 'Ungroup', remove: 'Remove from group' })[a] || (newLayout() ? 'Group' : 'Group together');
   $('group').title = { group: 'Cmd/Ctrl+G: a click on one then selects them all', ungroup: 'Cmd/Ctrl+Shift+G',
                        remove: 'Take just this object out of its group' }[a]
     || 'Cmd/Ctrl+click more objects, then group them: a click on one then selects them all';
@@ -3162,6 +3162,45 @@ async function save() {
 
 // --- Panel placement, quick guide, thumbnail -------------------------------
 
+// --- Panel layout ------------------------------------------------------------------
+// The panel in sections (Add, Selected, View, Project): the controls are moved there from the classic panel's
+// markup, with shorter labels and icons; setLayout('classic') puts them back (each place is kept by a comment).
+
+const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
+  ['add-npc', 'n-add-pair'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list']];
+const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
+                      'add-npc': ['Add NPC…', 'NPC…'] };
+const LAYOUT_ICONS = { drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
+                       'lock-btn': 'lock', 'light-btn': 'bulb' };
+const layoutHome = new Map();
+const newLayout = () => document.body.classList.contains('layout-new');
+
+for (const [id, name] of Object.entries(LAYOUT_ICONS)) {
+  $(id).classList.add('n-ic');
+  $(id).style.setProperty('--n-ic', iconMask(name));
+}
+
+function setLayout(v) {
+  const isNew = v !== 'classic';
+  document.body.classList.toggle('layout-new', isNew);
+  for (const [id, to] of LAYOUT_MOVES) {
+    const el = $(id);
+    if (!layoutHome.has(id)) {
+      const mark = document.createComment(id);
+      el.before(mark);
+      layoutHome.set(id, mark);
+    }
+    if (isNew) $(to).appendChild(el); else layoutHome.get(id).after(el);
+  }
+  for (const [id, [classic, short]] of Object.entries(LAYOUT_TEXT)) {
+    const label = [...$(id).childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+    if (label) label.textContent = isNew ? short : classic;
+    else $(id).append(isNew ? short : classic);
+  }
+  updateButtons();
+}
+
 function setDock(v) {
   document.body.classList.toggle('docked', v !== 'float');
   $('dock').value = v === 'float' ? 'float' : 'dock';
@@ -3169,6 +3208,7 @@ function setDock(v) {
   resize();
 }
 setDock(stored('ce-dock') || 'dock');
+setLayout('new');
 $('dock').addEventListener('change', () => { setDock($('dock').value); $('dock').blur(); });
 
 function showGuide() {

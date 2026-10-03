@@ -118,6 +118,50 @@
   #loading { position: fixed; left: 12px; bottom: 12px; color: var(--dim); background: var(--float); padding: 5px 10px;
              border: 1px solid var(--line); border-radius: var(--radius); z-index: 1; }
   #show-panel { position: fixed; top: 10px; left: 10px; z-index: 4; display: none; }
+
+  /* The new panel layout: the same controls in sections (body.layout-new; the classic one is the default look) */
+  .n-only, .n-lbl { display: none; }
+  body.layout-new .n-only { display: block; }
+  body.layout-new .n-lbl { display: inline; }
+  body.layout-new .psec.toolbar, body.layout-new #phone-row { display: none !important; }
+  body.layout-new .pair:empty { display: none; }
+  body.layout-new .psec h3 { text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }
+  body.layout-new .n-ic::before { content: ""; width: 16px; height: 16px; flex: none; background: currentColor;
+                                  -webkit-mask: var(--n-ic) center / contain no-repeat; mask: var(--n-ic) center / contain no-repeat; }
+  body.layout-new #n-bar { display: flex; align-items: center; gap: 4px; padding-top: 8px; padding-bottom: 8px; }
+  body.layout-new .n-grp { display: flex; gap: 4px; }
+  body.layout-new #n-bar button { height: 30px; }
+  body.layout-new #n-bar button.icon { width: 30px; }
+  body.layout-new #save { width: auto !important; padding: 4px 14px 4px 10px; gap: 7px; }
+  body.layout-new #save.dirty { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  body.layout-new #save.dirty::after { display: none; }
+  body.layout-new #n-add-pair { margin-top: 0; }
+  body.layout-new #n-add-pair button { height: 34px; font-weight: 600; }
+  body.layout-new #n-modes { display: grid; grid-template-columns: repeat(3, 1fr); margin: 8px 0 2px;
+                             border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  body.layout-new #n-modes button { width: auto; height: 30px; border: none; border-radius: 0; background: var(--field);
+                                    color: var(--dim); gap: 5px; }
+  body.layout-new #n-modes button + button { border-left: 1px solid var(--line); }
+  body.layout-new #n-modes button:hover { color: var(--text); }
+  body.layout-new #n-modes button.on { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+  body.layout-new .fields label { flex-direction: column; align-items: stretch; gap: 0; padding: 3px 6px 1px; }
+  body.layout-new .fields label span { font-size: 10.5px; line-height: 1.25; }
+  body.layout-new .fields input { padding: 0 0 3px; }
+  body.layout-new #sel-edit { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  body.layout-new #sel-edit .pair { display: contents; }
+  body.layout-new #sel-edit .fields { grid-column: 1 / -1; margin-bottom: 4px; }
+  body.layout-new #sel-edit button { justify-content: flex-start; height: 32px; gap: 8px; white-space: nowrap; overflow: hidden; }
+  body.layout-new #delete { grid-column: 1 / -1; justify-content: center !important; color: var(--bad);
+                            border-color: rgba(232, 135, 127, .35); }
+  body.layout-new #delete:hover:not(:disabled) { border-color: var(--bad); }
+  body.layout-new #n-view-list button { width: 100%; justify-content: flex-start; gap: 9px; background: none; border: none;
+                                        padding: 6px 2px; height: auto; }
+  body.layout-new #n-view-list button::after { content: ""; margin-left: auto; width: 30px; height: 17px; border-radius: 9px; flex: none;
+      background: radial-gradient(circle at 8.5px 50%, #fff 5.5px, transparent 6px), var(--line); transition: background .15s; }
+  body.layout-new #n-view-list button.on::after {
+      background: radial-gradient(circle at 21.5px 50%, #fff 5.5px, transparent 6px), var(--accent); }
+  body.layout-new #n-project-list { display: flex; flex-direction: column; gap: 6px; }
+  body.layout-new #n-project-list button { width: 100%; justify-content: flex-start; }
   body.panel-hidden #panel { display: none; }
   body.panel-hidden #show-panel { display: inline-flex; }
 
@@ -512,14 +556,16 @@
     <button id="cell-btn" title="Choose a cell"><i data-icon="pin"></i><span id="cell-name">…</span><i data-icon="chevDown"></i></button>
     <div id="others" style="display:none"></div>
   </div>
+  <div class="psec n-only" id="n-bar"><span id="n-bar-l" class="n-grp"></span><span class="spacer"></span><span id="n-bar-r"></span></div>
+  <div class="psec n-only" id="n-add"><h3>Add to the cell</h3><div class="pair" id="n-add-pair"></div></div>
   <div class="psec toolbar">
-    <button id="mode-move" class="icon on" title="Move (T)"><i data-icon="move"></i></button>
-    <button id="mode-turn" class="icon" title="Rotate (R)"><i data-icon="rotate"></i></button>
-    <button id="mode-scale" class="icon" title="Scale (Y): drag the handle"><i data-icon="scale"></i></button>
+    <button id="mode-move" class="icon on" title="Move (T)"><i data-icon="move"></i><span class="n-lbl">Move</span></button>
+    <button id="mode-turn" class="icon" title="Rotate (R)"><i data-icon="rotate"></i><span class="n-lbl">Rotate</span></button>
+    <button id="mode-scale" class="icon" title="Scale (Y): drag the handle"><i data-icon="scale"></i><span class="n-lbl">Scale</span></button>
     <span class="spacer"></span>
     <button id="undo" class="icon" title="Undo (Ctrl/Cmd+Z)"><i data-icon="undo"></i></button>
     <button id="redo" class="icon" title="Redo (Ctrl/Cmd+Shift+Z)" disabled><i data-icon="redo"></i></button>
-    <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i></button>
+    <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i><span class="n-lbl">Save</span></button>
     <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button><button id="light-btn" aria-pressed="false">Simulate lighting</button></div>
     <input type="checkbox" id="lock" checked hidden>
   </div>
@@ -531,6 +577,7 @@
     </h3>
     <div id="sel-name">Nothing selected</div>
     <div id="sel-info"></div>
+    <div class="n-only" id="n-modes" role="group" aria-label="Gizmo"></div>
     <div class="pair one npc-edit-row" id="npc-row" style="display:none"><button id="edit-npc" title="Stats, looks, inventory, spells, AI and dialogue of this NPC"><i data-icon="person"></i>Edit NPC…</button></div>
     <div id="sel-edit" style="display:none">
       <div class="fields">
@@ -569,6 +616,8 @@
     </div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
   </div>
+  <div class="psec n-only" id="n-view"><h3>View</h3><div id="n-view-list"></div></div>
+  <div class="psec n-only" id="n-project"><h3>Project</h3><div id="n-project-list"></div></div>
   <details id="settings" class="fold">
     <summary>Settings</summary>
     <div class="body">
