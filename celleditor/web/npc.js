@@ -901,7 +901,7 @@ async function create() {
   if (!canEdit) return 'existing';
   const pick = (arr, id) => (byId(arr, id) || [...arr].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))[0] || { id: '' }).id;
   const bg = dialog('<h3>New NPC</h3>'
-    + '<p class="dim">Places a new NPC at the clicked location. You can customize appearance, '
+    + '<p class="dim">A new NPC to place in the cell. You can customize appearance, '
     + 'stats, inventory, AI, and dialogue in the NPC editor.</p>'
     + '<label class="npc-f"><span>Name</span><input type="text" id="nn-name" maxlength="32" placeholder="e.g. Jiub"></label>'
     + '<label class="npc-f"><span>ID</span><input type="text" id="nn-id" maxlength="31" autocomplete="off"></label>'

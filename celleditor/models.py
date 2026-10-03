@@ -1,6 +1,7 @@
-"""Object id -> (record type, mesh) and the placeable-object catalog, read from the masters and cached."""
+"""Object id -> (record type, mesh), the placeable-object catalog and lights, read from the masters and cached."""
 import json
 import os
+import struct
 import sys
 
 from .esp import cstr, esm_records
@@ -11,7 +12,7 @@ CATALOG_TYPES = {"STAT": "Static", "CONT": "Container", "ACTI": "Activator", "DO
                  "MISC": "Misc", "BOOK": "Book", "CLOT": "Clothing", "INGR": "Ingredient", "APPA": "Apparatus",
                  "PROB": "Probe", "LOCK": "Lockpick", "REPA": "Repair", "ALCH": "Potion", "ARMO": "Armor",
                  "WEAP": "Weapon", "NPC_": "NPC"}
-VERSION = 4
+VERSION = 5
 
 
 def cache_dir():
@@ -26,13 +27,18 @@ def cache_dir():
 
 
 def _scan(path):
-    models, catalog = {}, []
+    models, catalog, lights = {}, [], {}
     for tag, _, subs in esm_records(path):
         if tag not in MODEL_TYPES or not subs or subs[0][0] != "NAME":
             continue
         oid = cstr(subs[0][1])
         d = dict(subs)
-        if "MODL" not in d and tag != "NPC_":          # most NPCs have no MODL: they use their race's body parts
+        if tag == "LIGH" and len(d.get("LHDT", b"")) >= 24:
+            # LHDT: weight, value, time, radius, colour (RGBA bytes), flags
+            radius, r, g, b, _, flags = struct.unpack_from("<i4BI", d["LHDT"], 12)
+            lights[oid.lower()] = [radius, r, g, b, flags]
+        # most NPCs have no MODL: they use their race's body parts; a light without one still shines
+        if "MODL" not in d and tag not in ("NPC_", "LIGH"):
             continue
         mesh = cstr(d.get("MODL", b""))
         models[oid.lower()] = (tag, mesh)
@@ -40,12 +46,14 @@ def _scan(path):
             catalog.append({"id": oid, "type": CATALOG_TYPES[tag], "name": cstr(d.get("FNAM", b"")),
                             "mesh": "" if tag == "NPC_" else mesh,       # an NPC's MODL is an animation, not its mesh
                             "file": os.path.basename(path)})
-    return models, catalog
+    return models, catalog, lights
 
 
 def load(masters):
-    """(models, catalog, origins) of the content files, later ones overriding earlier ones."""
-    models, catalog, origins = {}, {}, {}
+    """(models, catalog, origins, lights) of the content files, later ones overriding earlier ones.
+
+    lights: {id (lower case): [radius, red, green, blue, flags]}."""
+    models, catalog, origins, lights = {}, {}, {}, {}
     for path in masters:
         st = os.stat(path)
         key = "%s-%d-%d" % (os.path.basename(path).lower(), st.st_size, int(st.st_mtime))
@@ -59,8 +67,8 @@ def load(masters):
         except (OSError, ValueError):
             pass
         if data is None:
-            m, c = _scan(path)
-            data = {"version": VERSION, "models": m, "catalog": c}
+            m, c, li = _scan(path)
+            data = {"version": VERSION, "models": m, "catalog": c, "lights": li}
             try:
                 os.makedirs(cache_dir(), exist_ok=True)
                 with open(cache + ".tmp", "w") as f:
@@ -74,4 +82,5 @@ def load(masters):
             origins.setdefault(k, name)
         for o in data["catalog"]:
             catalog[o["id"].lower()] = dict(o, file=origins.get(o["id"].lower(), name))
-    return models, sorted(catalog.values(), key=lambda o: o["id"].lower()), origins
+        lights.update(data["lights"])
+    return models, sorted(catalog.values(), key=lambda o: o["id"].lower()), origins, lights

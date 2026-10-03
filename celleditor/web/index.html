@@ -165,6 +165,22 @@
   .pk-item .t, .pk-item .i { color: var(--dim); font-size: 11.5px; white-space: nowrap; }
   .pk-item .star { color: var(--dim); display: inline-flex; }
   .pk-item .star.on { color: var(--warn); }
+  #pk-list { overflow-anchor: none; }     /* rows added above keep their place by the list's own scrolling */
+  .pk-views { display: inline-flex; gap: 4px; margin-left: auto; }
+  #pk-list.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 4px; padding: 4px;
+                  align-content: start; }
+  .pk-cell { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 4px; min-width: 0;
+             border-radius: var(--radius); cursor: pointer; }
+  .pk-cell:hover, .pk-cell.sel { background: var(--accent-soft); }
+  .pk-cell.sel .th { outline: 2px solid var(--accent); }
+  .pk-cell .th { aspect-ratio: 1; border-radius: var(--radius); background: #1c1c24; color: #8a8a96; font-size: 11px;
+                 display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .pk-cell .th img { width: 100%; height: 100%; display: block; }
+  .pk-cell .cn { font-size: 12px; line-height: 1.25; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box;
+                 -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .pk-cell .star { position: absolute; top: 7px; right: 7px; color: #c8c8d0; display: inline-flex; opacity: 0; }
+  .pk-cell:hover .star, .pk-cell.sel .star, .pk-cell .star.on, body.touch .pk-cell .star { opacity: 1; }
+  .pk-cell .star.on { color: var(--warn); }
   .pk-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .pk-row label { display: flex; align-items: center; gap: 8px; }
   #picker details.fold { border: 1px solid var(--line-soft); border-radius: var(--radius); }
@@ -504,7 +520,7 @@
     <button id="undo" class="icon" title="Undo (Ctrl/Cmd+Z)"><i data-icon="undo"></i></button>
     <button id="redo" class="icon" title="Redo (Ctrl/Cmd+Shift+Z)" disabled><i data-icon="redo"></i></button>
     <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i></button>
-    <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button></div>
+    <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button><button id="light-btn" aria-pressed="false">Simulate lighting</button></div>
     <input type="checkbox" id="lock" checked hidden>
   </div>
   <div class="psec">
@@ -549,7 +565,7 @@
     </div>
     <div class="pair">
       <button id="add" title="Or right-click a surface"><i data-icon="plus"></i>Add object…</button>
-      <button id="add-npc" title="A new NPC: click where they should stand (or right-click a surface), then name them"><i data-icon="person"></i>Add NPC…</button>
+      <button id="add-npc" title="A new NPC: name them, then click where they should stand (or right-click a surface)"><i data-icon="person"></i>Add NPC…</button>
     </div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
   </div>
@@ -620,6 +636,7 @@
     <input id="pk-search" type="search" placeholder="Search by name or id, e.g. chair, crate, torch…" autocomplete="off">
     <div class="pk-row">
       <label><span id="pk-type-label">Type</span> <select id="pk-type"><option value="">All</option></select></label>
+      <span id="pk-views" class="pk-views"><button id="pk-view-list" class="icon" title="Show as a list"><i data-icon="list"></i></button><button id="pk-view-grid" class="icon" title="Show the models"><i data-icon="grid"></i></button></span>
     </div>
     <label id="pk-attach-row" class="check" style="display:none"><input type="checkbox" id="pk-attach" checked> <span id="pk-attach-label">Attach to</span></label>
     <label id="pk-group-row" class="check" style="display:none"><input type="checkbox" id="pk-group" checked> <span id="pk-group-label">Add to the group</span></label>

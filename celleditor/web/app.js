@@ -39,7 +39,8 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x101014);
 const camera = new THREE.PerspectiveCamera(70, 1, 2, 30000);
 camera.up.set(0, 0, 1);
-scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+const ambient = new THREE.AmbientLight(0xffffff, 1.4);
+scene.add(ambient);
 const headlight = new THREE.PointLight(0xfff2dd, 1.6, 0, 0);
 camera.add(headlight);
 scene.add(camera);
@@ -189,78 +190,252 @@ function aimCamera() {
   requestRender();
 }
 
+// --- Game lighting ----------------------------------------------------------
+// The cell lit as OpenMW lights it (components/sceneutil/lightutil.cpp, files/shaders/lib/light): the cell's
+// ambient and sunlight, and each light's colour fading as 1 / (c + l·d + q·d²), faded out between its radius and
+// twice it. OpenMW adds light up in the colours as stored, clamps the sum to 1 and multiplies the texture by it;
+// here the sum is turned into linear light before that, so the picture comes out the same.
+
+const gameLight = {
+  on: stored('ce-game-light') === '1', pool: [], info: new Map(), count: 0,
+  sun: new THREE.DirectionalLight(0xffffff, 1),
+  uniforms: { gameLight: { value: false }, gameAtt: { value: new THREE.Vector4() },
+              gameLin: { value: new THREE.Vector4() }, gameQuad: { value: new THREE.Vector4() } },
+};
+gameLight.sun.position.set(-1, 0.785, 0.785);       // OpenMW's interior sun: (-1, 45°, 45°), "what Morrowind uses"
+gameLight.sun.visible = false;
+scene.add(gameLight.sun);
+
+// A light's point light: cutoffDistance is its radius. gameAtt: constant, classic falloff; gameLin and gameQuad:
+// used, method, value, radius multiplier (openmw.cfg's LightAttenuation values).
+const GAME_ATTENUATION = `
+uniform bool gameLight;
+uniform vec4 gameAtt, gameLin, gameQuad;
+float gameTerm(vec4 t, float radius) {
+  if (t.x < 0.5) return 0.0;
+  if (t.y < 0.5) return t.z;
+  float r = radius * t.w;
+  return r > 0.0 && t.y < 2.5 ? t.z / pow(r, t.y) : 0.01;
+}
+float getDistanceAttenuation(const in float lightDistance, const in float cutoffDistance, const in float decayExponent) {
+  if (!gameLight) return threeDistanceAttenuation(lightDistance, cutoffDistance, decayExponent);
+  float c = gameAtt.x, l = gameTerm(gameLin, cutoffDistance), q = gameTerm(gameQuad, cutoffDistance);
+  if (c == 0.0 && l == 0.0 && q == 0.0) c = 1.0;
+  float lit = 1.0 / (c + l * lightDistance + q * lightDistance * lightDistance);
+  if (gameAtt.y < 0.5) {
+    float x = clamp(lightDistance / cutoffDistance - 1.0, 0.0, 1.0);
+    x = 1.0 - x * x;
+    lit *= x * x;
+  }
+  return lit;
+}
+`;
+const GAME_LIGHT_SUM = `
+if (gameLight) {
+  vec3 lit = clamp(reflectedLight.directDiffuse + reflectedLight.indirectDiffuse, 0.0, 1.0);
+  lit = mix(lit / 12.92, pow((lit + 0.055) / 1.055, vec3(2.4)), step(0.04045, lit));
+  reflectedLight.directDiffuse = lit * diffuseColor.rgb;
+  reflectedLight.indirectDiffuse = vec3(0.0);
+}
+`;
+
+// Lets a material draw with game lighting while gameLight is on.
+function gameLit(mat) {
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, gameLight.uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <lights_pars_begin>', THREE.ShaderChunk.lights_pars_begin
+        .replace('float getDistanceAttenuation(', 'float threeDistanceAttenuation(')
+        .replace('float getSpotAttenuation(', GAME_ATTENUATION + 'float getSpotAttenuation('))
+      .replace('#include <lights_lambert_pars_fragment>', THREE.ShaderChunk.lights_lambert_pars_fragment
+        .replaceAll('irradiance * BRDF_Lambert( material.diffuseColor )',
+                    '( gameLight ? irradiance : irradiance * BRDF_Lambert( material.diffuseColor ) )'))
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + GAME_LIGHT_SUM);
+  };
+  return mat;
+}
+
+const rgb = (c, f = 1 / 255) => [c[0] * f, c[1] * f, c[2] * f];
+
+// The cell's ambient, sunlight and attenuation; the editor's own light while game lighting is off.
+function applyMood() {
+  const on = gameLight.on && !!state.data?.lighting;
+  headlight.visible = !on;
+  gameLight.sun.visible = on;
+  for (const l of gameLight.pool) l.visible = on;
+  requestRender();
+  if (!on) { ambient.color.set(0xffffff); ambient.intensity = 1.4; return; }
+  const L = state.data.lighting, a = L.attenuation, mood = state.cell?.mood;
+  let amb = rgb(mood ? mood.ambient : L.night.ambient);
+  if (mood && !L.classicFalloff) {
+    // OpenMW brightens dark interiors up to the minimum interior brightness (RenderingManager::configureAmbient)
+    const lum = 0.2126 * amb[0] + 0.7152 * amb[1] + 0.0722 * amb[2], min = L.minInteriorBrightness;
+    if (lum < min) amb = lum === 0 ? [min, min, min] : amb.map((v) => v * min / lum);
+  }
+  ambient.color.setRGB(...amb, THREE.LinearSRGBColorSpace);
+  ambient.intensity = 1;
+  gameLight.sun.color.setRGB(...rgb(mood ? mood.sun : L.night.sun), THREE.LinearSRGBColorSpace);
+  const u = gameLight.uniforms;
+  u.gameAtt.value.set(a.UseConstant ? a.ConstantValue : 0, L.classicFalloff ? 1 : 0, 0, 0);
+  u.gameLin.value.set(a.UseLinear, a.LinearMethod, a.LinearValue, a.LinearRadiusMult);
+  u.gameQuad.value.set(a.UseQuadratic && (!a.OutQuadInLin || !mood) ? 1 : 0, a.QuadraticMethod, a.QuadraticValue,
+                       a.QuadraticRadiusMult);
+}
+
+// A reference's light ({radius, color, flags, at}), or null: from the cell's data, else asked for once per object.
+function lightOf(r) {
+  if (r.light !== undefined) return r.light;
+  const id = r.src.toLowerCase();
+  if (!gameLight.info.has(id)) {
+    gameLight.info.set(id, null);
+    fetch('/api/light?id=' + encodeURIComponent(r.src)).then((x) => x.json())
+      .then((li) => { gameLight.info.set(id, li); if (li) requestRender(); }).catch(() => {});
+  }
+  return gameLight.info.get(id);
+}
+
+// Puts the point lights on the shown lights, the nearest ones when there are more than the pool takes. The pool
+// grows by 8, so adding a light rarely means compiling the shaders again.
+function placeGameLights() {
+  const found = [];
+  for (const obj of objByKey.values()) {
+    const r = obj.userData.ref;
+    if (!obj.visible || r.kind === 'npc') continue;
+    const li = lightOf(r);
+    if (!li || li.flags & 0x20) continue;                   // off by default
+    const p = new THREE.Vector3(...(li.at || [0, 0, 0])).applyMatrix4(obj.matrix);
+    found.push({ p, li, d: p.distanceTo(camera.position) - li.radius });
+  }
+  gameLight.count = found.length;
+  const max = TOUCH ? 32 : 64;
+  if (found.length > max) found.sort((a, b) => a.d - b.d).length = max;
+  const size = Math.min(max, Math.ceil(found.length / 8) * 8);
+  while (gameLight.pool.length < size) {
+    const l = new THREE.PointLight(0x000000, 1);
+    gameLight.pool.push(l);
+    scene.add(l);
+  }
+  while (gameLight.pool.length > size) scene.remove(gameLight.pool.pop());
+  gameLight.pool.forEach((l, i) => {
+    const f = found[i];
+    if (!f) { l.color.setRGB(0, 0, 0); return; }
+    l.position.copy(f.p);
+    l.distance = Math.max(f.li.radius, 16);                 // Morrowind's smallest light radius
+    l.color.setRGB(...rgb(f.li.color, f.li.flags & 0x04 ? -1 / 255 : 1 / 255), THREE.LinearSRGBColorSpace);
+  });
+}
+
+// The cell view, with game lighting when it is on (only here: the preview and the model pictures share the materials).
+function renderView() {
+  if (gameLight.on) placeGameLights();
+  gameLight.uniforms.gameLight.value = gameLight.on;
+  renderer.render(scene, camera);
+  gameLight.uniforms.gameLight.value = false;
+}
+
+function setGameLight(on) {
+  gameLight.on = on;
+  try { localStorage.setItem('ce-game-light', on ? '1' : '0'); } catch (err) { /* private mode */ }
+  $('light-btn').classList.toggle('on', on);
+  $('light-btn').setAttribute('aria-pressed', String(on));
+  $('light-btn').title = on ? 'On: the cell is lit as OpenMW lights it, by its own light and its light sources. Click for the editor\'s even light.'
+    : 'Off: an even light to work in. Click to simulate how the game lights the cell.';
+  applyMood();
+}
+
+$('light-btn').addEventListener('click', () => {
+  setGameLight(!gameLight.on);
+  if (!gameLight.on) { status('Editor lighting.'); return; }
+  placeGameLights();
+  const mood = state.cell?.mood;
+  status(`Simulated lighting: ${gameLight.count} light${gameLight.count === 1 ? '' : 's'}`
+    + (gameLight.count > gameLight.pool.length ? ` (the nearest ${gameLight.pool.length} shown)` : '')
+    + (!mood ? ', as on a clear night.' : mood.known === false ? `; the cell's own light isn't known, so it is dim.` : '.'));
+});
+
 // --- Meshes and materials ---------------------------------------------------
 
 const meshCache = new Map();
 const texCache = new Map();
 const matCache = new Map();
 
+// userData.ready: settles when the image has loaded (or failed)
+function newTexture(name) {
+  const t = new THREE.DataTexture();
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.flipY = false;                       // NIF UVs are top-down
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 4;
+  t.userData.ready = fetch('/api/tex?name=' + encodeURIComponent(name))
+    .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))))
+    .then(decodeTexture)
+    .then((img) => {
+      t.image = img;
+      t.needsUpdate = true;
+      requestRender();
+    })
+    .catch((e) => console.warn('texture', name, e.message));
+  return t;
+}
+
 function texture(name) {
   if (!name) return null;
   const key = name.toLowerCase();
-  if (!texCache.has(key)) {
-    const t = new THREE.DataTexture();
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.flipY = false;                       // NIF UVs are top-down
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.magFilter = THREE.LinearFilter;
-    t.minFilter = THREE.LinearMipmapLinearFilter;
-    t.generateMipmaps = true;
-    t.anisotropy = 4;
-    fetch('/api/tex?name=' + encodeURIComponent(name))
-      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))))
-      .then(decodeTexture)
-      .then((img) => {
-        t.image = img;
-        t.needsUpdate = true;
-        requestRender();
-      })
-      .catch((e) => console.warn('texture', name, e.message));
-    texCache.set(key, t);
-  }
+  if (!texCache.has(key)) texCache.set(key, newTexture(name));
   return texCache.get(key);
 }
 
+const materialKey = (s) => [s.texture, s.blend, s.alphaTest, s.doubleSided, s.color != null, s.diffuse, s.alpha].join('|');
+
+function newMaterial(s, map) {
+  const blend = s.blend || s.alpha < 0.99;
+  return gameLit(new THREE.MeshLambertMaterial({
+    map,
+    color: new THREE.Color(...s.diffuse.map((v) => Math.min(1, v))),
+    emissive: new THREE.Color(...s.emissive.map((v) => Math.min(1, v * 0.5))),
+    vertexColors: s.color != null,
+    side: s.doubleSided || blend ? THREE.DoubleSide : THREE.FrontSide,
+    transparent: blend,
+    opacity: s.alpha,
+    alphaTest: s.alphaTest != null ? s.alphaTest : (blend ? 0.05 : 0),
+    depthWrite: !blend,
+  }));
+}
+
 function material(s) {
-  const key = [s.texture, s.blend, s.alphaTest, s.doubleSided, s.color != null, s.diffuse, s.alpha].join('|');
-  if (!matCache.has(key)) {
-    const blend = s.blend || s.alpha < 0.99;
-    matCache.set(key, new THREE.MeshLambertMaterial({
-      map: texture(s.texture),
-      color: new THREE.Color(...s.diffuse.map((v) => Math.min(1, v))),
-      emissive: new THREE.Color(...s.emissive.map((v) => Math.min(1, v * 0.5))),
-      vertexColors: s.color != null,
-      side: s.doubleSided || blend ? THREE.DoubleSide : THREE.FrontSide,
-      transparent: blend,
-      opacity: s.alpha,
-      alphaTest: s.alphaTest != null ? s.alphaTest : (blend ? 0.05 : 0),
-      depthWrite: !blend,
-    }));
-  }
+  const key = materialKey(s);
+  if (!matCache.has(key)) matCache.set(key, newMaterial(s, texture(s.texture)));
   return matCache.get(key);
 }
 
+function shapeGeometry(s) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(s.pos, 3));
+  if (s.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(s.uv, 2));
+  if (s.color) g.setAttribute('color', new THREE.Float32BufferAttribute(s.color, 3));
+  g.setIndex(s.index);
+  if (s.normal) g.setAttribute('normal', new THREE.Float32BufferAttribute(s.normal, 3));
+  else g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}
+
+const meshShapes = (path) => fetch('/api/mesh?path=' + encodeURIComponent(path)).then((r) => r.json());
+
 async function meshParts(path) {
   if (!meshCache.has(path)) {
-    meshCache.set(path, fetch('/api/mesh?path=' + encodeURIComponent(path)).then((r) => r.json()).then((shapes) =>
-      shapes.map((s) => {
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.Float32BufferAttribute(s.pos, 3));
-        if (s.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(s.uv, 2));
-        if (s.color) g.setAttribute('color', new THREE.Float32BufferAttribute(s.color, 3));
-        g.setIndex(s.index);
-        if (s.normal) g.setAttribute('normal', new THREE.Float32BufferAttribute(s.normal, 3));
-        else g.computeVertexNormals();
-        g.computeBoundingSphere();
-        return { geometry: g, material: material(s) };
-      })).catch(() => []));
+    meshCache.set(path, meshShapes(path).then((shapes) =>
+      shapes.map((s) => ({ geometry: shapeGeometry(s), material: material(s) }))).catch(() => []));
   }
   return meshCache.get(path);
 }
 
 const placeholders = {
   npc: [new THREE.CapsuleGeometry(22, 80, 4, 12).rotateX(Math.PI / 2).translate(0, 0, 62),
-        new THREE.MeshLambertMaterial({ color: 0x5fa0e0 })],
+        gameLit(new THREE.MeshLambertMaterial({ color: 0x5fa0e0 }))],
   light: [new THREE.SphereGeometry(8, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd060 })],
   marker: [new THREE.BoxGeometry(16, 16, 16), new THREE.MeshBasicMaterial({ color: 0xd050d0, wireframe: true })],
 };
@@ -349,6 +524,7 @@ let NOOK_NAMES = {};
 
 function setupProject() {
   const p = state.data.project;
+  setGameLight(gameLight.on);
   if (p && p.name) document.title = `${p.name} · Cell Editor`;
   if (p) $('menu-name').textContent = p.plugin;
   if (state.data.here === false) {
@@ -395,6 +571,7 @@ async function loadCell(name, keepCamera = false) {
   world = new THREE.Group();
   scene.add(world);
   state.cell = cell;
+  applyMood();
   localStorage.setItem('ce-last-cell', name);
   updateCellControls();
   objByKey.clear();
@@ -899,18 +1076,21 @@ function offerDraft() {
   const d = state.data.live.draft;
   if (!d) return;
   $('draft-text').textContent = `Unsaved changes from ${new Date(d.at).toLocaleString()} were found: the editor `
-    + 'stopped before they were saved.';
+    + 'stopped before they were saved. Restoring them can be undone.';
   $('draft-banner').classList.add('open');
+  // one undo step, back to what the page had before
   $('draft-restore').onclick = async () => {
     $('draft-banner').classList.remove('open');
+    const before = entriesOf(state.edits);
     state.edits = withSections(d.edits);
-    state.undo = [];
+    const diff = diffOf(before, entriesOf(state.edits));
+    state.undo = diff.length ? [{ diff }] : [];
     state.redo = [];
-    state.undoMark = 0;
+    state.undoMark = state.undo.length;
     updateDirty();
     cellCache.clear();
     await loadCell(state.cell.name, true);
-    status('Unsaved changes restored.');
+    status('Unsaved changes restored. Undo (Ctrl/Cmd+Z) takes them back.');
   };
   $('draft-drop').onclick = () => {
     $('draft-banner').classList.remove('open');
@@ -1400,8 +1580,9 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
     for (const [value, label] of g.options) og.appendChild(new Option(label, value));
     type.appendChild(og);
   }
-  // remember: a name to keep the chosen type under, so the picker opens on it again
+  // remember: a name to keep the chosen type and the last object picked under, so the picker opens on them again
   picker.remember = remember && 'ce-pk-type-' + remember;
+  picker.lastKey = remember && 'ce-pk-last-' + remember;
   const last = picker.remember && stored(picker.remember);
   if (last && [...type.options].some((o) => o.value === last)) type.value = last;
   if (modTiers) { tierChoices(); updatePickerModSummary(); } else $('pk-tier').innerHTML = '';
@@ -1414,9 +1595,11 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
   $('pk-box').classList.toggle('with-preview', !!action);
   $('pk-type-label').textContent = action ? 'Category' : 'Type';
   if (action) $('pk-pv-use').textContent = action;
+  $('pk-views').style.display = action ? '' : 'none';
+  picker.grid = stored('ce-pk-view') === 'grid';
   preview.shown = null;
   $('picker').classList.add('open');
-  filterPicker();
+  filterPicker(true);
   if (!TOUCH) {
     $('pk-search').focus();
     $('pk-search').select();
@@ -1480,43 +1663,83 @@ function closePicker() {
   resumeFlySoon();
 }
 
-const PICKER_ROWS = 250;
+// Rows are made PICKER_ROWS at a time around what is shown, from picker.start to picker.end. A multiple of
+// 60, so a model grid (up to 6 columns) keeps its columns when rows are added above.
+const PICKER_ROWS = 240;
+const gridView = () => picker.grid && previewing();
+const rowAt = (i) => $('pk-list').children[i - picker.start];
 
-function renderPicker() {
+function renderPicker(at = 0) {
   const list = $('pk-list');
   list.innerHTML = '';
+  list.classList.toggle('grid', gridView());
+  list.scrollTop = 0;
+  $('pk-view-list').classList.toggle('on', !gridView());
+  $('pk-view-grid').classList.toggle('on', gridView());
+  thumbs.observer?.disconnect();
+  thumbs.queue.clear();
   picker.paints = new Map();
-  picker.shown = 0;
-  moreRows(PICKER_ROWS);
-  showPreview(picker.items[picker.sel]);
+  picker.sel = at;
+  picker.start = picker.end = Math.max(0, Math.floor((at - PICKER_ROWS / 2) / 60) * 60);
+  moreRows(picker.start + PICKER_ROWS);
+  showPreview(picker.items[at]);
   $('pk-count').textContent = `${picker.items.length} matches`;
-  list.children[picker.sel]?.scrollIntoView({ block: 'nearest' });
+  if (at) showRow(rowAt(at), true);
 }
 
-function moreRows(upTo = picker.shown + PICKER_ROWS) {
+function moreRows(upTo = picker.end + PICKER_ROWS) {
   const list = $('pk-list');
   const end = Math.min(picker.items.length, upTo);
-  for (let i = picker.shown; i < end; i++) list.appendChild(pickerRow(picker.items[i], i));
-  picker.shown = Math.max(picker.shown, end);
+  for (let i = picker.end; i < end; i++) list.appendChild(pickerRow(picker.items[i], i));
+  picker.end = Math.max(picker.end, end);
+}
+
+function earlierRows() {
+  const list = $('pk-list');
+  const from = Math.max(0, picker.start - PICKER_ROWS);
+  const rows = document.createDocumentFragment();
+  for (let i = from; i < picker.start; i++) rows.appendChild(pickerRow(picker.items[i], i));
+  const height = list.scrollHeight;
+  list.prepend(rows);
+  list.scrollTop += list.scrollHeight - height;
+  picker.start = from;
+}
+
+// Scrolls the list (not the dialog) to show a row: centred, or just into view.
+function showRow(row, center = false) {
+  if (!row) return;
+  const l = $('pk-list'), lr = l.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (center) l.scrollTop += r.top - lr.top - (lr.height - r.height) / 2;
+  else if (r.top < lr.top) l.scrollTop += r.top - lr.top;
+  else if (r.bottom > lr.bottom) l.scrollTop += r.bottom - lr.bottom;
 }
 
 $('pk-list').addEventListener('scroll', () => {
   const l = $('pk-list');
   if (l.scrollTop + l.clientHeight > l.scrollHeight - 600) moreRows();
+  if (l.scrollTop < 600 && picker.start > 0) earlierRows();
 });
 
 function pickerRow(o, i) {
+  const grid = gridView();
   const row = document.createElement('div');
-  row.className = 'pk-item' + (i === picker.sel ? ' sel' : '');
-  row.innerHTML = '<span class="n"></span><span class="t"></span>';
-  row.querySelector('.n').textContent = o.name ? `${o.name}  ` : o.id;
-  if (o.name) {
-    const id = document.createElement('span');
-    id.className = 'i';
-    id.textContent = o.id;
-    row.querySelector('.n').appendChild(id);
+  row.className = (grid ? 'pk-cell' : 'pk-item') + (i === picker.sel ? ' sel' : '');
+  if (grid) {
+    row.innerHTML = '<div class="th"></div><div class="cn"></div>';
+    row.querySelector('.cn').textContent = o.name || o.id;
+    row.title = o.name ? `${o.name} (${o.id})` : o.id;
+    wantThumb(row, o);
+  } else {
+    row.innerHTML = '<span class="n"></span><span class="t"></span>';
+    row.querySelector('.n').textContent = o.name ? `${o.name}  ` : o.id;
+    if (o.name) {
+      const id = document.createElement('span');
+      id.className = 'i';
+      id.textContent = o.id;
+      row.querySelector('.n').appendChild(id);
+    }
+    row.querySelector('.t').textContent = o.type;
   }
-  row.querySelector('.t').textContent = o.type;
   if (picker.star) {
     const st = document.createElement('span');
     const paint = () => { const on = picker.star.on(o); st.innerHTML = icon(on ? 'starFilled' : 'star'); st.className = 'star' + (on ? ' on' : ''); };
@@ -1531,7 +1754,8 @@ function pickerRow(o, i) {
   return row;
 }
 
-function filterPicker() {
+// atLast: open on the object picked last time, if it is in the list
+function filterPicker(atLast = false) {
   const words = $('pk-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const type = $('pk-type').value;
   const score = (o) => {
@@ -1552,28 +1776,38 @@ function filterPicker() {
   picker.items = picker.source.filter(matchType)
     .map((o) => [first(o), score(o), o]).filter(([, sc]) => sc >= 0)
     .sort((a, b) => a[0] - b[0] || a[1] - b[1] || (a[2].rank ?? 0) - (b[2].rank ?? 0)).map(([, , o]) => o);
-  picker.sel = 0;
-  renderPicker();
+  const last = atLast && picker.lastKey && stored(picker.lastKey);
+  renderPicker(last ? Math.max(0, picker.items.findIndex((o) => o.id === last)) : 0);
 }
 
 function pick(o) {
   const fn = picker.onPick;
   if ($('pk-tier').options.length) picker.tier = $('pk-tier').value;
+  if (picker.lastKey) try { localStorage.setItem(picker.lastKey, o.id); } catch (err) { /* private mode */ }
   closePicker();
   if (fn) fn(o);
 }
 
-$('pk-search').addEventListener('input', filterPicker);
+$('pk-search').addEventListener('input', () => filterPicker());
 $('pk-type').addEventListener('change', () => {
   if (picker.remember) try { localStorage.setItem(picker.remember, $('pk-type').value); } catch (err) { /* private mode */ }
-  filterPicker();
+  filterPicker(true);
 });
+for (const view of ['list', 'grid']) {
+  $('pk-view-' + view).addEventListener('click', () => {
+    picker.grid = view === 'grid';
+    try { localStorage.setItem('ce-pk-view', view); } catch (err) { /* private mode */ }
+    renderPicker(picker.sel);
+  });
+}
 $('pk-cancel').addEventListener('click', closePicker);
 $('picker').addEventListener('click', (e) => { if (e.target === $('picker')) closePicker(); });
 $('pk-search').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closePicker(); return; }
   if (e.key === 'Enter' && picker.items[picker.sel]) { pick(picker.items[picker.sel]); return; }
-  const d = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  // in the grid: up and down a row of models
+  const step = gridView() ? getComputedStyle($('pk-list')).gridTemplateColumns.split(' ').length : 1;
+  const d = { ArrowDown: step, ArrowUp: -step }[e.key];
   if (d) {
     e.preventDefault();
     highlight(Math.max(0, Math.min(picker.items.length - 1, picker.sel + d)));
@@ -1581,13 +1815,127 @@ $('pk-search').addEventListener('keydown', (e) => {
 });
 
 function highlight(i) {
-  if (i >= picker.shown) moreRows(i + PICKER_ROWS);
-  const rows = $('pk-list').children;
-  rows[picker.sel]?.classList.remove('sel');
+  if (i >= picker.end) moreRows(i + PICKER_ROWS);
+  while (i < picker.start) earlierRows();
+  rowAt(picker.sel)?.classList.remove('sel');
   picker.sel = i;
-  rows[i]?.classList.add('sel');
-  rows[i]?.scrollIntoView({ block: 'nearest' });
+  rowAt(i)?.classList.add('sel');
+  showRow(rowAt(i));
   showPreview(picker.items[i]);
+}
+
+// --- Model pictures for the grid ---------------------------------------------
+// Drawn by a renderer of their own from the mesh, one picture per mesh. A mesh or texture not already loaded
+// for the cell or the preview is loaded just for the picture and freed after it.
+
+const THUMB_PX = 160;
+const thumbs = { renderer: null, scene: null, camera: null, group: null, pics: new Map(), queue: new Set(),
+                 observer: null, running: 0 };
+
+function wantThumb(row, o) {
+  const th = row.querySelector('.th');
+  if (!o.mesh) { th.innerHTML = o.type === 'NPC' ? icon('person') : 'No model'; return; }
+  const key = o.mesh.toLowerCase();
+  const pic = thumbs.pics.get(key);
+  if (thumbs.pics.has(key) && !(pic instanceof Promise)) { putThumb(th, pic); return; }
+  row.thumbOf = o;
+  if (!thumbs.observer) {
+    thumbs.observer = new IntersectionObserver((seen) => {
+      for (const e of seen) {
+        if (e.isIntersecting) thumbs.queue.add(e.target); else thumbs.queue.delete(e.target);
+      }
+      drawThumbs();
+    }, { root: $('pk-list'), rootMargin: '300px 0px' });
+  }
+  thumbs.observer.observe(row);
+}
+
+function putThumb(th, pic) {
+  if (!pic) { th.textContent = 'No model'; return; }
+  const img = new Image();
+  img.src = pic;
+  img.alt = '';
+  th.replaceChildren(img);
+}
+
+async function drawThumbs() {
+  while (thumbs.running < 3 && thumbs.queue.size) {
+    const [row] = thumbs.queue;
+    thumbs.queue.delete(row);
+    thumbs.observer.unobserve(row);
+    if (!row.isConnected) continue;
+    thumbs.running++;
+    thumbPicture(row.thumbOf.mesh)
+      .then((pic) => { if (row.isConnected) putThumb(row.querySelector('.th'), pic); })
+      .finally(() => { thumbs.running--; drawThumbs(); });
+  }
+}
+
+function thumbPicture(mesh) {
+  const key = mesh.toLowerCase();
+  if (!thumbs.pics.has(key)) {
+    const pic = drawThumb(mesh).catch(() => null);
+    thumbs.pics.set(key, pic);
+    // keep a few thousand pictures (a few kB each)
+    if (thumbs.pics.size > 4000) thumbs.pics.delete(thumbs.pics.keys().next().value);
+    pic.then((p) => { if (thumbs.pics.get(key) === pic) thumbs.pics.set(key, p); });
+  }
+  return Promise.resolve(thumbs.pics.get(key));
+}
+
+async function drawThumb(mesh) {
+  const own = [];
+  let parts;
+  if (meshCache.has(mesh)) parts = await meshCache.get(mesh);
+  else {
+    const shapes = await meshShapes(mesh);
+    parts = shapes.map((s) => {
+      const key = s.texture && s.texture.toLowerCase();
+      let map = key ? texCache.get(key) : null;
+      if (s.texture && !map) own.push(map = newTexture(s.texture));
+      const p = { geometry: shapeGeometry(s), material: matCache.get(materialKey(s)) || newMaterial(s, map) };
+      own.push(p.geometry);
+      if (p.material !== matCache.get(materialKey(s))) own.push(p.material);
+      return p;
+    });
+  }
+  try {
+    await Promise.all(parts.map((p) => p.material.map?.userData.ready));
+    if (!thumbs.renderer) {
+      thumbs.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      thumbs.renderer.setSize(THUMB_PX, THUMB_PX, false);
+      thumbs.scene = new THREE.Scene();
+      thumbs.scene.background = new THREE.Color(0x1c1c24);
+      thumbs.camera = new THREE.PerspectiveCamera(35, 1, 1, 100000);
+      thumbs.camera.up.set(0, 0, 1);
+      thumbs.scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+      const light = new THREE.DirectionalLight(0xfff2dd, 1.6);
+      light.position.set(-0.4, -0.3, 1);
+      thumbs.camera.add(light);
+      thumbs.scene.add(thumbs.camera);
+      thumbs.group = new THREE.Group();
+      thumbs.scene.add(thumbs.group);
+    }
+    thumbs.group.clear();
+    for (const p of parts) thumbs.group.add(new THREE.Mesh(p.geometry, p.material));
+    const box = new THREE.Box3().setFromObject(thumbs.group);
+    if (box.isEmpty()) return null;
+    // the preview's first view
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const dist = Math.max(sphere.radius, 4) / Math.sin((thumbs.camera.fov / 2) * DEG) * 1.05;
+    const yaw = 0.6, pitch = 0.35, c = sphere.center, cam = thumbs.camera;
+    cam.position.set(c.x - Math.sin(yaw) * Math.cos(pitch) * dist, c.y - Math.cos(yaw) * Math.cos(pitch) * dist,
+                     c.z + Math.sin(pitch) * dist);
+    cam.near = Math.max(0.5, dist / 200);
+    cam.far = dist * 20;
+    cam.updateProjectionMatrix();
+    cam.lookAt(c);
+    thumbs.renderer.render(thumbs.scene, cam);
+    return thumbs.renderer.domElement.toDataURL('image/jpeg', 0.85);
+  } finally {
+    thumbs.group?.clear();
+    for (const x of own) x.dispose();
+  }
 }
 
 // --- Object preview in the picker -------------------------------------------
@@ -1715,24 +2063,30 @@ function surfaceAt(ndcX, ndcY) {
   return raycaster.intersectObjects(world.children, true).find((h) => visibleChain(h.object) && !h.object.userData.water);
 }
 
-function addAt(hit, kind = 'object') {
-  const preset = state.placeObject;
-  state.placeObject = null;
-  if (state.cell.canAdd === false) {
-    const p = state.data.project;
-    status(p.standalone ? `Objects can't be added here: the cell comes from a mod, and the project is standalone.`
-      : p.inPlace ? `Objects can't be added here: the cell comes from a file that loads after ${p.plugin}.`
-      : `Objects can't be added here: ${p.plugin} can only use cells of ${p.masters.join(', ')}.`, true);
-    return;
-  }
+function cantAdd() {
+  if (state.cell.canAdd !== false) return null;
+  const p = state.data.project;
+  return p.standalone ? `Objects can't be added here: the cell comes from a mod, and the project is standalone.`
+    : p.inPlace ? `Objects can't be added here: the cell comes from a file that loads after ${p.plugin}.`
+    : `Objects can't be added here: ${p.plugin} can only use cells of ${p.masters.join(', ')}.`;
+}
+
+// The picker's attach and group choices for the object picked.
+const pickedOptions = () => ({ attach: $('pk-attach-row').style.display !== 'none' && $('pk-attach').checked,
+                               group: $('pk-group-row').style.display !== 'none' && $('pk-group').checked });
+
+// preset: { o, opts, then } of an object already chosen; then runs once it is placed
+function addAt(hit, kind = 'object', preset = null) {
+  const why = cantAdd();
+  if (why) { status(why, true); return; }
   if (!hit) { status('Point at a surface to place the object.', true); return; }
   const point = hit.point.clone();
   const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1);
   const base = refOf(hit.object);
   const baseRef = base && !base.userData.ref.structure ? base.userData.ref : null;
   const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
-  showAddMarker(hit);
-  const put = async (o) => {
+  if (!preset) showAddMarker(hit);
+  const put = async (o, opts = pickedOptions()) => {
     const parts = o.mesh ? await meshParts(o.mesh) : [];
     const box = new THREE.Box3();
     for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
@@ -1754,9 +2108,8 @@ function addAt(hit, kind = 'object') {
     const obj = await makeObject(r);
     world.add(obj);
     objByKey.set(r.key, obj);
-    const offered = (row) => !preset && $(row).style.display !== 'none';
-    if (baseRef && offered('pk-attach-row') && $('pk-attach').checked) state.edits.attached[r.key] = baseRef.key;
-    const grouped = group && offered('pk-group-row') && state.edits.groups[group] && $('pk-group').checked;
+    if (baseRef && opts.attach) state.edits.attached[r.key] = baseRef.key;
+    const grouped = group && opts.group && state.edits.groups[group];
     if (grouped) state.edits.groups[group].push(r.key);
     state.undo.push({ obj, added: uid });
     const join = state.joinCopy;
@@ -1769,7 +2122,7 @@ function addAt(hit, kind = 'object') {
            + (grouped ? `, in the group (${state.edits.groups[group].length} objects).` : '.')
            + (obj.visible ? '' : ' It belongs to a tier that is hidden right now.'));
   };
-  if (preset) { put(preset); return; }
+  if (preset) { put(preset.o, preset.opts).then(() => preset.then?.()); return; }
   if (kind === 'npc') { newNpc(put); return; }
   pickObject('Add object', true, put, baseRef ? `"${baseRef.src}" (moves with it)` : null, 'Add',
              group ? state.edits.groups[group].length : 0);
@@ -1777,12 +2130,15 @@ function addAt(hit, kind = 'object') {
 
 // --- Placing ---------------------------------------------------------------
 
-function startPlacing(kind = 'object') {
+// preset: { o, opts } of an object already chosen, placed where clicked
+function startPlacing(kind = 'object', preset = null) {
   if (state.placing) return;
   const body = document.body;
-  state.placing = { hidden: body.classList.contains('panel-hidden'), open: body.classList.contains('panel-open'), kind };
+  state.placing = { hidden: body.classList.contains('panel-hidden'), open: body.classList.contains('panel-open'), kind, preset };
   if (TOUCH && !sidePanel()) body.classList.remove('panel-open');
-  $('place-text').textContent = kind === 'npc' ? 'Click where the NPC should stand (a floor, the ground).'
+  const name = preset && (preset.o.name || preset.o.id);
+  $('place-text').textContent = kind === 'npc' ? `Click where ${name || 'the NPC'} should stand (a floor, the ground).`
+    : preset ? `Click where to place ${name} (a floor, a table, a wall).`
     : 'Click where to place the object (a floor, a table, a wall).';
   $('place-banner').classList.add('open');
   canvas.style.cursor = 'crosshair';
@@ -1790,10 +2146,13 @@ function startPlacing(kind = 'object') {
   resize();
 }
 
-function stopPlacing() {
+function stopPlacing(placed = false) {
   const p = state.placing;
   if (!p) return;
   state.placing = null;
+  if (!placed && p.preset?.then) {
+    status(`${p.preset.o.name || p.preset.o.id} wasn't placed: Add NPC… → Place an existing NPC… places them later.`);
+  }
   $('place-text').textContent = 'Click where to place the object (a floor, a table, a wall).';
   document.body.classList.toggle('panel-hidden', p.hidden);
   document.body.classList.toggle('panel-open', p.open);
@@ -1806,12 +2165,35 @@ function stopPlacing() {
 
 function placeAt(ndcX, ndcY) {
   const hit = surfaceAt(ndcX, ndcY);
-  const kind = state.placing?.kind;
-  stopPlacing();
-  addAt(hit, kind);
+  const { kind, preset } = state.placing || {};
+  stopPlacing(true);
+  addAt(hit, kind, preset);
 }
 
-$('place-cancel').addEventListener('click', () => { state.placeObject = null; stopPlacing(); });
+$('place-cancel').addEventListener('click', () => stopPlacing());
+
+// Add object…: choose the object, then where it goes.
+function addObject() {
+  if (!state.cell) return;
+  const why = cantAdd();
+  if (why) { status(why, true); return; }
+  stopPlacing();
+  const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
+  pickObject('Add object', true, (o) => startPlacing('object', { o, opts: pickedOptions() }),
+             'the object it is placed on (moves with it)', 'Add', group ? state.edits.groups[group].length : 0);
+}
+
+// Add NPC…: a new NPC (or one chosen from the load order), then where they stand.
+async function addNpc() {
+  if (!state.cell) return;
+  const why = cantAdd();
+  if (why) { status(why, true); return; }
+  stopPlacing();
+  const n = await npcEditor.create();
+  if (n === 'existing') { pickNpc((o) => startPlacing('npc', { o, opts: {} })); return; }
+  if (!n) { resumeFlySoon(); return; }
+  startPlacing('npc', { o: { id: n.id, name: n.name, type: 'NPC', mesh: '' }, opts: {}, then: () => openNpcs(n.id) });
+}
 
 function swapSelected() {
   const objs = state.selection.filter((o) => o.visible && o.userData.ref.editable);
@@ -1828,7 +2210,7 @@ function swapSelected() {
       const r = obj.userData.ref;
       if (r.origin === 'added') state.edits.added.find((a) => 'added|' + a.uid === r.key).id = o.id;
       else state.edits.replaced[r.key] = o.id;
-      Object.assign(r, { src: o.id, mesh: o.mesh, kind: 'mesh', structure: false });
+      Object.assign(r, { src: o.id, mesh: o.mesh, kind: 'mesh', structure: false, light: undefined });
     }
     await Promise.all(objs.map(fillObject));
     setSelection(objs);
@@ -1837,8 +2219,8 @@ function swapSelected() {
   }, null, 'Swap');
 }
 
-$('add').addEventListener('click', () => startPlacing());
-$('add-npc').addEventListener('click', () => startPlacing('npc'));
+$('add').addEventListener('click', addObject);
+$('add-npc').addEventListener('click', addNpc);
 $('swap').addEventListener('click', swapSelected);
 
 // --- Quick menu (right click / long-press) ----------------------------------
@@ -2545,7 +2927,7 @@ if (TOUCH) {
   };
   $('tb-add').addEventListener('click', () => addMenu(!$('tb-add-menu').classList.contains('open')));
   for (const b of $('tb-add-menu').querySelectorAll('button')) {
-    b.addEventListener('click', () => { addMenu(false); startPlacing(b.dataset.add); });
+    b.addEventListener('click', () => { addMenu(false); if (b.dataset.add === 'npc') addNpc(); else addObject(); });
   }
   window.addEventListener('pointerdown', (e) => {
     if ($('tb-add-menu').classList.contains('open') && !e.target.closest('#tb-add-menu, #tb-add')) addMenu(false);
@@ -2732,10 +3114,8 @@ const npcEditor = setupNpcEditor({
     const src = fromId && ([state.selected, ...objByKey.values()].find((x) => x && x.visible
       && x.userData.ref.kind === 'npc' && x.userData.ref.src.toLowerCase() === fromId.toLowerCase()));
     if (!src || !src.userData.ref.editable) {
-      state.placeObject = o;
       state.joinCopy = { id: n.id, from, before };
-      startPlacing();
-      $('place-text').textContent = `Click where to place ${n.name || n.id}.`;
+      startPlacing('npc', { o, opts: {} });
       return;
     }
     setSelection([src]);
@@ -2846,7 +3226,7 @@ function sendPicture(saved) {
   if (!state.cell || $('loading').style.display !== 'none') return;
   const hide = [gizmoHelper, selBoxes, markers].filter((o) => o.visible);
   for (const o of hide) o.visible = false;
-  renderer.render(scene, camera);
+  renderView();
   const pic = document.createElement('canvas');
   pic.width = 320;
   pic.height = 200;
@@ -3156,7 +3536,7 @@ function viewPicture(ev) {
     for (const o of hide) o.visible = false;
     camera.lookAt(camera.position.clone().add(viewDir()));
     camera.updateMatrixWorld();
-    renderer.render(scene, camera);
+    renderView();
     const w = Math.min(ev.width || 1024, canvas.width), h = Math.round(w * canvas.height / canvas.width);
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
@@ -3304,7 +3684,7 @@ function frame(now) {
   sendWhere(now);
   if (needsRender || gizmo.dragging) {
     needsRender = false;
-    renderer.render(scene, camera);
+    renderView();
   }
   if (previewNeedsRender) {
     previewNeedsRender = false;
@@ -3313,7 +3693,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-window.editor = { state, camera, gizmo, proxy, THREE, aimCamera, select, loadCell, render: () => renderer.render(scene, camera) };
+window.editor = { state, camera, gizmo, proxy, THREE, aimCamera, select, loadCell, render: renderView };
 
 keepAlive(() => {
   if (state.stopped) return;

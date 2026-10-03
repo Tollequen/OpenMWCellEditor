@@ -297,7 +297,7 @@ def t_place(args):
         oid = next((c["id"] for c in json.loads(S._catalog) if c["id"].lower() == oid.lower()), oid)
         tier = _tier_ok(cell, o.get("tier"))
         uid = _uid()
-        r = {"key": "added|" + uid, "id": oid, "src": oid, "kind": "mesh" if m[1] and m[0] != "NPC_" else "npc",
+        r = {"key": "added|" + uid, "id": oid, "src": oid, "kind": "npc" if m[0] == "NPC_" else "mesh" if m[1] else "light",
              "mesh": m[1], "pos": _vec(o.get("pos"), "objects[%d].pos" % i), "rot": _rad_rot(o.get("rot")),
              "scale": min(2.0, max(0.5, float(o.get("scale") or 1.0))), "origin": "added"}
         if tier:

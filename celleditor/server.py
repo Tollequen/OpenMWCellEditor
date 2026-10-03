@@ -11,6 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import desktop, esp, geometry, launcher, mcp, models, nif, qr, writer
+from .gamedata import openmw_cfg, read_cfg
 from .history import History, states
 from .live import LIVE
 
@@ -21,7 +22,8 @@ STRUCTURE_PREFIXES = ("in_", "ex_", "terrain_")
 project = None
 history = None
 _models = _catalog = _land = None
-_mesh_cache, _tex_cache = {}, {}
+_lights = {}
+_mesh_cache, _tex_cache, _light_points = {}, {}, {}
 _disk_meshes = set()
 
 
@@ -492,11 +494,13 @@ def model_index():
     """The object index (id -> (type, mesh)) of the masters and the project, and the catalog."""
     global _models, _catalog
     if _models is None:
-        m, c, _ = models.load(project.load.paths)
+        m, c, _, li = models.load(project.load.paths)
         usable = project.usable_files()
         if usable is not None:
             c = [o for o in c if o["file"].lower() in usable]
         _catalog = json.dumps(c).encode()
+        _lights.clear()
+        _lights.update(li)
         _models = m
     extra = project.extra_models()
     _disk_meshes.update(v[1] for v in extra.values() if v[1] and os.path.isabs(v[1]))
@@ -537,7 +541,90 @@ def _entry(r, clones, index):
             "file": r.get("origin"), "changedBy": r.get("changed_by") or [],
             "isDoor": bool(m and m[0] == "DOOR"), "door": _door(r),
             "winsOver": [f for f in r.get("changed_by") or [] if f.lower() in project.loads_after],
-            "nook": t[0] if t else None, "tier": t[1] if t else None, "only": bool(t and t[2]), "orig": orig}
+            "nook": t[0] if t else None, "tier": t[1] if t else None, "only": bool(t and t[2]), "orig": orig,
+            "light": light_info(src, index) if m and m[0] == "LIGH" else None}
+
+
+# --- Lighting -------------------------------------------------------------------------
+# What OpenMW lights a cell with: the cell's AMBI colours, and each light's radius and colour fading as
+# 1 / (c + l·d + q·d²) with the LightAttenuation fallback values of openmw.cfg (components/sceneutil/lightutil.cpp).
+
+LIGHT_FALLBACKS = {"UseConstant": 0, "ConstantValue": 0.0, "UseLinear": 1, "LinearMethod": 1, "LinearValue": 3.0,
+                   "LinearRadiusMult": 1.0, "UseQuadratic": 0, "QuadraticMethod": 2, "QuadraticValue": 16.0,
+                   "QuadraticRadiusMult": 1.0, "OutQuadInLin": 0}
+NIGHT_FALLBACKS = {"Weather_Clear_Ambient_Night_Color": [32, 35, 42], "Weather_Clear_Sun_Night_Color": [59, 97, 176]}
+
+
+def light_info(oid, index=None):
+    """A light's {radius, color (0-255), flags, at (where its mesh has AttachLight, or None)}, or None."""
+    index = model_index() if index is None else index
+    rec = _lights.get(oid.lower())
+    if not rec:
+        return None
+    m = index.get(oid.lower())
+    mesh = m[1] if m and m[1] and not m[1].lower().endswith("editormarker.nif") else None
+    return {"radius": rec[0], "color": rec[1:4], "flags": rec[4], "at": _light_point(mesh) if mesh else None}
+
+
+def _light_point(mesh):
+    if mesh not in _light_points:
+        try:
+            _light_points[mesh] = nif.attach_light(mesh_bytes(mesh))
+        except Exception:
+            _light_points[mesh] = None
+    return _light_points[mesh]
+
+
+def cell_mood(name):
+    """An interior's light: {ambient, sun, fog} colours (0-255) from its AMBI; None for an exterior."""
+    if esp.parse_exterior(name):
+        return None
+    try:
+        head = dict(project.load.cell_head(name))
+    except KeyError:
+        try:                              # a cell of the project's own (a generator's): as last written
+            head = dict(esp.cell_refs(project.plugin, name)[0])
+        except (KeyError, OSError):
+            return {"ambient": [0, 0, 0], "sun": [0, 0, 0], "fog": [0, 0, 0], "known": False}
+    if len(head.get("DATA", b"")) >= 4 and struct.unpack_from("<I", head["DATA"])[0] & 0x80:
+        return None                       # behaves like an exterior: lit by the weather
+    a = head.get("AMBI", b"")
+    if len(a) < 12:
+        return {"ambient": [0, 0, 0], "sun": [0, 0, 0], "fog": [0, 0, 0], "known": True}
+    return {"ambient": list(a[0:3]), "sun": list(a[4:7]), "fog": list(a[8:11]), "known": True}
+
+
+def lighting():
+    """openmw.cfg's light fallback values and settings.cfg's [Shaders] values that change how lights look."""
+    att, night, shaders = dict(LIGHT_FALLBACKS), dict(NIGHT_FALLBACKS), {}
+    cfg = openmw_cfg()
+    try:
+        for v in read_cfg(cfg).get("fallback", []) if cfg else []:
+            k, _, val = v.partition(",")
+            if k.startswith("LightAttenuation_") and k[17:] in att:
+                att[k[17:]] = float(val)
+            elif k in night:
+                night[k] = [int(x) for x in val.split(",")[:3]]
+        with open(os.path.join(os.path.dirname(cfg), "settings.cfg"), encoding="utf-8", errors="replace") as f:
+            section = None
+            for line in f:
+                line = line.strip()
+                if line.startswith("["):
+                    section = line.strip("[]").strip().lower()
+                elif section == "shaders" and "=" in line and not line.startswith("#"):
+                    k, _, val = line.partition("=")
+                    shaders[k.strip().lower()] = val.strip()
+    except (OSError, TypeError, ValueError):
+        pass
+
+    def num(key, default):
+        try:
+            return float(shaders.get(key, default))
+        except ValueError:
+            return default
+    return {"attenuation": att, "classicFalloff": shaders.get("classic falloff", "false").lower() == "true",
+            "minInteriorBrightness": num("minimum interior brightness", 0.08),
+            "night": {"ambient": night["Weather_Clear_Ambient_Night_Color"], "sun": night["Weather_Clear_Sun_Night_Color"]}}
 
 
 def _door(r):
@@ -629,7 +716,7 @@ def scene():
     return {"project": info(), "cells": all_cells(), "own": list(project.own_cells), "favorites": fav["cells"],
             "objectFavorites": fav["objects"], "recentObjects": fav["recent"], "startCell": start, "nooks": nooks,
             "edits": edits, "live": LIVE.state(), "orphans": orphans, "notice": _take_notice(), "views": views(),
-            "hasThumb": os.path.exists(_thumb_file(project.path, ".jpg"))}
+            "hasThumb": os.path.exists(_thumb_file(project.path, ".jpg")), "lighting": lighting()}
 
 
 def _take_notice():
@@ -680,7 +767,7 @@ def cell_data(name, edits=None):
         start = {"pos": [0, 0, 100], "yaw": 0.0}
     can_add = project.can_add(name)
     return {"name": name, "refs": refs, "start": start, "water": water, "grid": list(grid) if grid else None,
-            "canAdd": can_add}
+            "canAdd": can_add, "mood": cell_mood(name)}
 
 
 def _moved_in_from(grid, edits=None):
@@ -1152,6 +1239,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(cell_data(q["name"])).encode())
             if u.path == "/api/terrain":
                 return self.reply(json.dumps(terrain(int(q["x"]), int(q["y"]))).encode())
+            if u.path == "/api/light":
+                return self.reply(json.dumps(light_info(q["id"])).encode())
             if u.path == "/api/history":
                 return self.reply(json.dumps(history.summary()).encode())
             if u.path == "/api/history/version":

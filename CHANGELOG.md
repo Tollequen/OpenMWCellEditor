@@ -4,6 +4,11 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 
 ## [Unreleased]
 
+- **Simulate lighting**: a button next to Lock walls lights the cell as OpenMW does: the cell's ambient and sunlight, and each light's colour and radius with the falloff from openmw.cfg. Lights update as they are moved, added or removed. Exteriors show a clear night.
+- **Choose first, then place**: Add object… opens the object list at once, and Add NPC… names the new NPC (or picks an existing one) first; it is placed where you click next.
+- **Restoring unsaved changes can be undone**: after Restore changes, Undo goes back to the saved plugin.
+- **Back where you were**: the object list opens on the object picked last time (as well as the category).
+- **Model grid**: the object list can show the models as pictures (the list and grid buttons next to Category).
 - **NPCs aren't duplicated**: Duplicate skips NPCs (it would place the same NPC twice); Copy as new NPC… makes a separate one.
 - **Copy as new NPC**: one undo step for the new NPC and its placement; copies of upgrade-tier NPCs save correctly.
 - **Messages**: "Saving…" stays until the result comes; reconnecting ends with "Connected again."

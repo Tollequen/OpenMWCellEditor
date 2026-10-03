@@ -147,6 +147,36 @@ def _source_file(blocks, ref):
     return blocks.get(ref, {}).get('file')
 
 
+def attach_light(d):
+    """Where a light's mesh has its AttachLight node (OpenMW puts the light there): (x, y, z), or None."""
+    blocks = _parse(d)
+    root = blocks.get(0)
+    if not root or 'children' not in root:
+        return None
+
+    def find(i, M, t, s):
+        b = blocks.get(i)
+        if b is None or 't' not in b:
+            return None
+        M2 = _mm(M, b['R']); t2 = tuple(t[k] + s * v for k, v in enumerate(_mv(M, b['t']))); s2 = s * b['s']
+        if b.get('name', b'').lower() == b'attachlight':
+            return t2
+        for c in b.get('children', []):
+            found = find(c, M2, t2, s2) if c >= 0 else None
+            if found:
+                return found
+        return None
+
+    # the root's own transform is dropped, as in shapes()
+    M, t, s = (root['R'], root['t'], root['s']) if root.get('name', b'').lower() == b'bip01' \
+        else (I3, (0.0, 0.0, 0.0), 1.0)
+    for c in root['children']:
+        found = find(c, M, t, s) if c >= 0 else None
+        if found:
+            return found
+    return None
+
+
 def shapes(d):
     """The shapes in a NIF file's bytes: dicts of flat vertex lists, texture and material values."""
     blocks = _parse(d)

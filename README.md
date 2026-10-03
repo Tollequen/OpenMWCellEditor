@@ -36,7 +36,8 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
   - **Parent Attachment (`B`)**: Attaches objects to whatever they stand on. Moving the table moves all dishes, cups, and clutter placed on top of it.
   - **Lock Walls & Floors (`L`)**: Prevents accidental selection of walls, ceilings, and floors so you can easily click fine clutter.
   - **Multi-Selection & Groups**: Select multiple objects (`Ctrl/Cmd+Click`) or group them (`Ctrl/Cmd+G`) to manipulate entire furniture arrangements at once.
-  - **Visual 3D Catalog**: Searchable object browser with live 3D preview, star favorites, and mod-specific filtering.
+  - **Visual 3D Catalog**: Searchable object browser with live 3D preview, a grid of model pictures, star favorites, and mod-specific filtering.
+  - **Simulate Lighting**: See a cell lit as in OpenMW (its own ambient light and every light source's colour and radius) instead of the editor's even light, and watch it change as you move lights. Exteriors show a clear night.
 
 - **NPC & Dialogue Editor (Beta)**:
   - **Create & Place NPCs**: Click **Add NPC...** or right-click to create new NPCs.
