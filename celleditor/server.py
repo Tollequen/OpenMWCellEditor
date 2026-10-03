@@ -10,7 +10,7 @@ import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import desktop, esp, launcher, models, nif, qr, writer
+from . import desktop, esp, geometry, launcher, mcp, models, nif, qr, writer
 from .history import History, states
 from .live import LIVE
 
@@ -32,6 +32,7 @@ def setup(p):
     history = History(p.file("history"))
     _models = _catalog = _land = None
     _disk_meshes.clear()
+    geometry.clear()
     LIVE.start(p.path, p.load_edits())
     if SETTINGS:
         SETTINGS.add_recent(p.path)
@@ -699,18 +700,23 @@ def terrain(x, y):
 
 # --- Meshes and textures ---------------------------------------------------------
 
+def mesh_bytes(path):
+    """A mesh file's bytes: a project's own mesh on disk, or the game's."""
+    if os.path.isabs(path):
+        if path not in _disk_meshes:
+            raise KeyError(path)
+        with open(path, "rb") as f:
+            return f.read()
+    data = project.game.read("meshes\\" + path)
+    if data is None:
+        raise KeyError(path)
+    return data
+
+
 def mesh(path):
     """A mesh's shapes as JSON."""
     if path not in _mesh_cache:
-        if os.path.isabs(path):
-            if path not in _disk_meshes:
-                raise KeyError(path)
-            with open(path, "rb") as f:
-                data = f.read()
-        else:
-            data = project.game.read("meshes\\" + path)
-            if data is None:
-                raise KeyError(path)
+        data = mesh_bytes(path)
         out = []
         try:
             shapes = nif.shapes(data)
@@ -1022,9 +1028,26 @@ class Handler(SimpleHTTPRequestHandler):
         return self.reply((CODE_PAGE % ('<p class="bad">%s</p>' % note if note else "")).encode(),
                           "text/html; charset=utf-8", 403 if note else 200)
 
+    def mcp_on(self):
+        """The assistant endpoint is off unless the settings file has "assistant_mcp": true (no UI for it yet)."""
+        return urlparse(self.path).path == "/mcp" and bool(SETTINGS and SETTINGS.get("assistant_mcp"))
+
+    def mcp_allowed(self):
+        """MCP only for programs on this computer, and no web page of another site (DNS rebinding)."""
+        origin = self.headers.get("Origin")
+        if origin and urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1"):
+            return False
+        return self.here()
+
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if self.mcp_on():
+            self.send_response(405)
+            self.send_header("Allow", "POST")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if u.path in ("/favicon.ico", "/apple-touch-icon-precomposed.png"):
             with open(os.path.join(WEB, "favicon.png" if u.path == "/favicon.ico" else "apple-touch-icon.png"), "rb") as f:
                 return self.reply(f.read(), "image/png")
@@ -1102,6 +1125,21 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        if self.mcp_on():
+            if not self.mcp_allowed():
+                return self.reply(b'{"error": "only for programs on this computer"}', code=403)
+            try:
+                code, out = mcp.handle_body(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+            except Exception:
+                traceback.print_exc()
+                code, out = 500, json.dumps({"jsonrpc": "2.0", "id": None,
+                                             "error": {"code": -32603, "message": "Internal error"}}).encode()
+            if out is None:
+                self.send_response(code)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self.reply(out, code=code)
         if not self.allowed():
             return self.reply(b'{"ok": false, "message": "access code needed"}', code=403)
         try:
@@ -1144,6 +1182,9 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/thumb":
                 return self.reply(json.dumps(dict({"ok": True}, **save_thumb(body.get("data"), body.get("cell"),
                                                                              body.get("saved")))).encode())
+            if u.path == "/api/live/answer":
+                LIVE.answer(body.get("req"), body.get("data") or {})
+                return self.reply(b'{"ok": true}')
             if u.path == "/api/live/bye":
                 LIVE.leave(body.get("page"))
                 return self.reply(b'{"ok": true}')

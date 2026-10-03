@@ -2935,8 +2935,8 @@ async function flushAll() {
   }
 }
 
-function take(ops, from) {
-  const changed = [];
+function take(ops, from, step = null) {
+  const changed = [], back = [];
   for (const op of ops) {
     const json = op.v == null ? undefined : JSON.stringify(op.v);
     const before = live.shared.get(op.id);
@@ -2948,8 +2948,15 @@ function take(ops, from) {
     if (json === before || entryOf(state.edits, op.id) !== before) continue;
     setEntry(state.edits, op.id, json === undefined ? null : JSON.parse(json));
     changed.push(op.id);
+    back.push({ id: op.id, v: before });
   }
-  if (changed.length) showChanges(changed);
+  // An assistant's change (MCP) is one step this page's Undo takes back, stacked like a local edit; another
+  // device's change instead drops what the undo steps would put back over it.
+  if (changed.length) showChanges(changed, !step);
+  if (step && back.length) {
+    state.undo.push({ diff: back });
+    status(`${step.label}. Undo takes it back.`);
+  }
   syncSoon();
 }
 
@@ -2969,7 +2976,7 @@ function onLive(ev) {
     live.lastWhere = '';
     updateMarkers();
   } else if (ev.type === 'ops') {
-    take(ev.ops, ev.from);
+    take(ev.ops, ev.from, ev.undo ? ev : null);
     if (ev.from !== pageId) $('draft-banner').classList.remove('open');
   } else if (ev.type === 'saved') {
     take(opsTo(ev.edits), null);
@@ -2978,6 +2985,8 @@ function onLive(ev) {
   } else if (ev.type === 'project') {
     try { sessionStorage.setItem('ce-note', ev.path === state.data.project.path ? 'same' : 'other'); } catch (err) { /* private mode */ }
     location.reload();
+  } else if (ev.type === 'ask') {
+    answerAsk(ev);
   } else if (ev.type === 'presence') {
     live.others.set(ev.page, ev);
     updateMarkers();
@@ -3108,13 +3117,58 @@ function sendWhere(now) {
   if (!live.ready || !state.cell || now - live.whereAt < 250) return;
   const info = { label: DEVICE, cell: state.cell.name, pos: camera.position.toArray().map(Math.round),
                  yaw: Math.round(state.yaw * 1000) / 1000, pitch: Math.round(state.pitch * 1000) / 1000,
-                 sel: state.selection.map((o) => o.userData.ref.key) };
+                 sel: state.selection.map((o) => o.userData.ref.key), tiers: state.tiers };
   const json = JSON.stringify(info);
   if (json === live.lastWhere) return;
   live.lastWhere = json;
   live.whereAt = now;
   fetch('/api/live/where', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                              body: JSON.stringify(Object.assign({ page: pageId }, info)) }).catch(() => {});
+}
+
+// A picture for an assistant (MCP), from the user's camera or another one; the user's view doesn't move.
+function viewPicture(ev) {
+  if (!state.cell) throw new Error('The editor shows no cell.');
+  const keep = { pos: camera.position.clone(), yaw: state.yaw, pitch: state.pitch, tiers: { ...state.tiers } };
+  const hide = [gizmoHelper, markers].filter((o) => o.visible);
+  try {
+    if (ev.pos) camera.position.set(...ev.pos);
+    if (ev.yaw != null) state.yaw = ev.yaw;
+    if (ev.pitch != null) state.pitch = ev.pitch;
+    if (ev.tiers) { Object.assign(state.tiers, ev.tiers); refreshVisibility(); }
+    for (const o of hide) o.visible = false;
+    camera.lookAt(camera.position.clone().add(viewDir()));
+    camera.updateMatrixWorld();
+    renderer.render(scene, camera);
+    const w = Math.min(ev.width || 1024, canvas.width), h = Math.round(w * canvas.height / canvas.width);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    const deg = (a) => Math.round(a * 1800 / Math.PI) / 10;
+    return { image: c.toDataURL('image/jpeg', 0.85),
+             camera: { pos: camera.position.toArray().map(Math.round), yaw: (deg(state.yaw) + 360) % 360, pitch: deg(state.pitch) } };
+  } finally {
+    for (const o of hide) o.visible = true;
+    camera.position.copy(keep.pos);
+    state.yaw = keep.yaw;
+    state.pitch = keep.pitch;
+    if (ev.tiers) {
+      for (const k of Object.keys(state.tiers)) if (!(k in keep.tiers)) delete state.tiers[k];
+      Object.assign(state.tiers, keep.tiers);
+      refreshVisibility();
+    }
+    aimCamera();
+  }
+}
+
+function answerAsk(ev) {
+  let data;
+  try {
+    if (ev.what !== 'view') throw new Error(`Unknown question ${ev.what}.`);
+    data = viewPicture(ev);
+  } catch (err) { data = { error: err.message }; }
+  fetch('/api/live/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ req: ev.req, data }) }).catch(() => {});
 }
 
 const markers = new THREE.Group();

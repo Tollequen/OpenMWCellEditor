@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import itertools
 import queue
 import threading
 import time
@@ -57,6 +58,9 @@ class Live:
         self.pages = {}
         self.remote = set()
         self.presence = {}
+        self.asks = {}
+        self.seen = {}
+        self._ask_ids = itertools.count(1)
         self._timer = None
 
     # --- The project ---------------------------------------------------------------
@@ -76,6 +80,11 @@ class Live:
         with self.lock:
             return edits_of(self.ents)
 
+    def unsaved(self):
+        """How many entries differ from the saved edits."""
+        with self.lock:
+            return sum(1 for i in set(self.ents) | set(self.saved) if not _same(self.ents.get(i), self.saved.get(i)))
+
     def state(self):
         """What a page starts with: the edits now, and a draft to offer back if nothing has changed."""
         with self.lock:
@@ -88,8 +97,11 @@ class Live:
 
     # --- Changes -------------------------------------------------------------------
 
-    def apply(self, page, path, ops):
-        """A page's changes; False if the page shows another project."""
+    def apply(self, page, path, ops, extra=None):
+        """A page's changes; False if the page shows another project.
+
+        extra goes into the event: {"undo": True, "label": ...} makes the pages offer the change as one undo
+        step (changes from an assistant, which has no undo of its own)."""
         with self.lock:
             if not self.path or os.path.normcase(path or "") != os.path.normcase(self.path):
                 return False
@@ -100,7 +112,7 @@ class Live:
                 else:
                     self.ents[i] = op["v"]
             self.version += 1
-            self._send({"type": "ops", "from": page, "ops": ops, "version": self.version})
+            self._send(dict(extra or {}, type="ops", ops=ops, version=self.version, **{"from": page}))
             self._draft_later()
             return True
 
@@ -141,6 +153,7 @@ class Live:
                     self.pages[page].put(None)
                 del self.pages[page]
                 self.remote.discard(page)
+                self.seen.pop(page, None)
                 if self.presence.pop(page, None) is not None:
                     self._send({"type": "gone", "page": page})
 
@@ -159,9 +172,41 @@ class Live:
         with self.lock:
             if page not in self.pages:
                 return
-            info = {k: info.get(k) for k in ("label", "cell", "pos", "yaw", "pitch", "sel")}
+            info = {k: info.get(k) for k in ("label", "cell", "pos", "yaw", "pitch", "sel", "tiers")}
             self.presence[page] = info
+            self.seen[page] = time.time()
             self._send(dict(info, type="presence", page=page), skip=page)
+
+    def pages_here(self):
+        """[(page, presence)] of the pages on this computer showing a cell, the last one to move first."""
+        with self.lock:
+            out = [(k, dict(p)) for k, p in self.presence.items()
+                   if k in self.pages and k not in self.remote and p.get("cell")]
+        return sorted(out, key=lambda kp: -self.seen.get(kp[0], 0))
+
+    def ask(self, page, event, timeout=20.0):
+        """Ask one page something (e.g. a picture); its answer, or None if it doesn't answer in time."""
+        box = {"done": threading.Event(), "answer": None}
+        with self.lock:
+            q = self.pages.get(page)
+            if q is None:
+                return None
+            n = next(self._ask_ids)
+            self.asks[n] = box
+            q.put(dict(event, type="ask", req=n))
+        try:
+            box["done"].wait(timeout)
+        finally:
+            with self.lock:
+                self.asks.pop(n, None)
+        return box["answer"]
+
+    def answer(self, n, data):
+        with self.lock:
+            box = self.asks.get(n)
+            if box:
+                box["answer"] = data
+                box["done"].set()
 
     def _send(self, event, skip=None):
         for page, q in self.pages.items():
