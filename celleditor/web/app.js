@@ -1627,8 +1627,8 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
   picker.star = star;
   // attach: the object it would be attached to, or true when that is where it is placed later
   $('pk-attach-row').style.display = attach ? '' : 'none';
-  $('pk-attach-row').title = attach === true ? 'It moves with the object it is placed on'
-    : attach ? `It moves with ${attach}` : '';
+  $('pk-attach-row').title = attach === true ? 'Moves together with the object below'
+    : attach ? `Moves together with ${attach}` : '';
   $('pk-box').classList.toggle('with-preview', !!action);
   $('pk-type-label').textContent = action ? 'Category' : 'Type';
   if (action) $('pk-pv-use').textContent = action;
@@ -2425,9 +2425,9 @@ function toggleAttach() {
   }
   setAttachments(changes);
   const n = changes.length;
-  if (detach) status(n > 1 ? `Detached ${n} objects.` : 'Detached: no longer moves with object below.');
+  if (detach) status(n > 1 ? `Detached ${n} objects.` : 'Detached.');
   else if (n === 1 && objs.length === 1) {
-    status(`Attached to ${objByKey.get(changes[0][1])?.userData.ref.src}: it now moves with it.`);
+    status(`Attached to ${objByKey.get(changes[0][1])?.userData.ref.src}.`);
   } else {
     status([n ? `Attached ${n} object${n > 1 ? 's' : ''} to object below.` : '',
             skipped.length ? `Not attached: ${skipped.join('; ')}.` : ''].filter(Boolean).join(' '), !n);
@@ -2448,7 +2448,7 @@ function attachBelow(obj) {
   const { under, why } = objectBelow(obj);
   if (!under) { status(`Can't attach: ${why}.`, true); return; }
   setAttached(obj, under.userData.ref.key);
-  status(`Attached to ${under.userData.ref.src}: it now moves with it.`);
+  status(`Attached to ${under.userData.ref.src}.`);
 }
 
 function resetSelected() {

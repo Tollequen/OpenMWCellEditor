@@ -12,6 +12,7 @@ const CSS = `
              border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; box-shadow: var(--shadow);
              max-width: 300px; box-sizing: border-box; font-size: 12px; pointer-events: none; }
 body.pad #pad-hints { display: block; }
+body.pad #pad-hints.off { display: none; }
 #pad-hints .ph-title { font-weight: 600; margin-bottom: 6px; }
 #pad-hints .ph-title span { font-weight: 400; color: var(--dim); }
 #pad-hints dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; margin: 0; align-items: center; }
@@ -37,7 +38,9 @@ body.docked:not(.touch):not(.panel-hidden) #pad-menu { left: calc(50% + var(--pw
                     cursor: pointer; white-space: nowrap; }
 #pad-menu .pm-row.on { background: var(--accent-soft); }
 #pad-menu .pm-row .v { color: var(--dim); }
-#pad-menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }`;
+#pad-menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+.pb.pad-key { display: none; vertical-align: middle; flex: none; }
+body.pad .pb.pad-key { display: inline-flex; }`;
 
 const ZERO = { x: 0, y: 0, z: 0, fast: 1 };
 let api = null, connected = false, warned = false, active = false;
@@ -59,6 +62,7 @@ export function setupGamepad(a) {
     el.id = id;
     document.body.appendChild(el);
   }
+  pickerKeys();
   addEventListener('gamepadconnected', () => { connected = true; });
   addEventListener('gamepaddisconnected', () => { connected = [...navigator.getGamepads()].some(Boolean); });
   const off = () => { if (active) setActive(false); };
@@ -67,6 +71,24 @@ export function setupGamepad(a) {
   addEventListener('pointerdown', (e) => { if (menu && !e.target.closest('#pad-menu')) closeMenu(); }, true);
   addEventListener('keydown', (e) => { if (menu && e.key === 'Escape') closeMenu(); });
   return { update };
+}
+
+// The object list's buttons on its own controls, shown in controller mode.
+function pickerKeys() {
+  const key = (t, cls = '') => {
+    const k = document.createElement('span');
+    k.className = `pb pad-key ${cls}`;
+    k.textContent = t;
+    return k;
+  };
+  const type = document.getElementById('pk-type');
+  type.before(key('LB', 'sh'));
+  type.after(key('RB', 'sh'));
+  document.getElementById('pk-type-label').before(key('☰', 'sh'));
+  document.getElementById('pk-views').prepend(key('X', 'x'));
+  for (const [id, t, cls] of [['pk-pv-use', 'A', 'a'], ['pk-pv-fav', 'Y', 'y'], ['pk-cancel', 'B', 'b']]) {
+    document.getElementById(id).before(key(t, cls));
+  }
 }
 
 function standardPad() {
@@ -176,7 +198,7 @@ function update(dt) {
 
   const trigger = (i) => Math.max(0, (v[i] - 0.05) / 0.95);
   const carrying = !!s.carry;
-  s.pad = { x: lx, y: -ly, z: lt && !carrying ? 0 : (b[RB] ? 1 : 0) - (b[LB] ? 1 : 0),
+  s.pad = { x: lx, y: -ly, z: (b[RB] ? 1 : 0) - (b[LB] ? 1 : 0),
             fast: carrying ? 1 : 1 + 3 * trigger(RT) };
   if (rx || ry) {
     const k = LOOK_SPEED * settings.look * dt;
@@ -203,8 +225,6 @@ function update(dt) {
     return;
   }
 
-  if (lt && pressed(LB)) api.moveStep(-1);
-  if (lt && pressed(RB)) api.moveStep(1);
   if (s.fine) {
     document.getElementById('pad-aim').classList.remove('on');
     repeat(b, lt, (i, withLt) => api.fine.step(DIR[i], withLt));
@@ -434,6 +454,8 @@ function hints(mode, lt = false) {
                mode === 'picker' && api.picker.categoryName() + api.picker.grid()].join('|');
   if (key === hintKey) return;
   hintKey = key;
+  // The object list shows its buttons on its own controls.
+  document.getElementById('pad-hints').classList.toggle('off', mode === 'picker');
   const rows = [];
   const row = (k, what) => rows.push(`<dt>${k}</dt><dd>${what}</dd>`);
   const fly = () => {
@@ -485,15 +507,13 @@ function hints(mode, lt = false) {
     row(pb('B', 'b'), 'Cancel');
   } else if (lt && mode !== 'fine') {
     const n = s.selection.length;
-    title = `${SH('LT')} held` + (n ? ` <span>· ${n} selected</span>` : '');
+    title = 'Multi-select' + (n ? ` <span>· ${n} selected</span>` : '');
     if (lastAim) row(pb('A', 'a'), s.selection.includes(lastAim) ? 'Remove from the selection' : 'Add to the selection');
-    row(SH('LB') + SH('RB'), `Move step: ${s.moveStep} units`);
     row(SH('⧉'), 'Redo');
   } else if (mode === 'fine' && lt) {
     title = `Fine tune · ${SH('LT')} held`;
     row(SH('↑↓'), `Raise / lower (${s.moveStep} units)`);
     row(SH('←→'), `Rotate (${s.rotStep}°)`);
-    row(SH('LB') + SH('RB'), `Move step: ${s.moveStep} units`);
   } else if (mode === 'fine') {
     title = 'Fine tune';
     row(SH('↑↓←→'), `Move (${s.moveStep} units)`);
@@ -517,7 +537,7 @@ function hints(mode, lt = false) {
     row(pb('Y', 'y'), 'Add object');
     row(SH('⧉'), 'Undo');
     row(SH('☰'), 'Menu');
-    row(SH('LT'), 'Hold for more');
+    row(SH('LT'), 'Hold to multi-select');
   }
   document.getElementById('pad-hints').innerHTML = `<div class="ph-title">${title}</div><dl>${rows.join('')}</dl>`;
 }
