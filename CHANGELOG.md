@@ -4,6 +4,8 @@ All notable changes to Morrowind Cell Editor are documented in this file.
 
 ## [Unreleased]
 
+- **Game controllers**: fly with a controller (Xbox, PlayStation, Switch Pro and others the browser knows). Aim at an object and A grabs it: it follows the view, rests on surfaces it meets, and A drops it onto the surface below or B lets go where it is. LT and RT bring it closer or farther, the arrows tilt and rotate it, Y floats it through walls. X opens Actions for the object (swap, duplicate, delete, scale, attach, fine tune with the arrows), Y adds an object from the object list, Back undoes, Start opens a menu (save, history, view and step settings, controller settings). Hold LT and press A to select several, then grab or group them. A box at the right shows the buttons for what you are doing; the panel hides while the controller is used.
+- **Drop messages**: "Dropped onto the floor." (or the ground, or the object it landed on).
 - **Scroll to move forward and back**: the mouse wheel or trackpad scroll moves the camera, in steps that grow with the distance to what is under the pointer.
 - **Sections as windows**: drag a panel section's title (Add to the cell, Selected, View, Project) out of the panel to make it a window of its own, placed anywhere and kept there, also while the panel is hidden. Drop it back on the panel, or use Back to the panel in its ⋯ menu, to return it.
 - **Floating panel by default**: the panel floats over the view unless Settings → Panel says Docked.

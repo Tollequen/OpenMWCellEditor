@@ -7,6 +7,7 @@ import { keepAlive, showStopped } from './alive.js';
 import { phoneButton } from './phone.js';
 import { icon, iconMask, fillIcons } from './icons.js';
 import { setupNpcEditor } from './npc.js';
+import { setupGamepad } from './gamepad.js';
 
 const $ = (id) => document.getElementById(id);
 fillIcons();
@@ -102,7 +103,7 @@ let gizmoStart = null;
 
 let facingFor = '';
 function syncGizmo() {
-  const objs = state.placing || state.multiTouch ? [] : roots();
+  const objs = state.placing || state.multiTouch || state.padActive ? [] : roots();
   if (!objs.length) { gizmo.detach(); facingFor = ''; return; }
   const r = (objs.includes(state.selected) ? state.selected : objs[0]).userData.ref;
   proxy.position.copy(pivotOf(objs));
@@ -762,7 +763,8 @@ function groupSelected() {
   changeGroups((groups) => {
     for (const k of keys) { const g = groupOf(k); if (g) delete groups[g]; }
     groups['g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)] = [...keys];
-  }, `Grouped ${keys.size} objects: a ${TOUCH ? 'tap' : 'click'} on one selects them all${TOUCH ? '' : ' (Alt+click: just one)'}.`);
+  }, state.padActive ? `Grouped ${keys.size} objects: grabbing one grabs the whole group.`
+    : `Grouped ${keys.size} objects: a ${TOUCH ? 'tap' : 'click'} on one selects them all${TOUCH ? '' : ' (Alt+click: just one)'}.`);
 }
 
 function ungroupSelected() {
@@ -1402,7 +1404,7 @@ function snapAxis(dx, dy) {
   return Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
 }
 
-function nudge(forward, right, up) {
+function nudge(forward, right, up, withUndo = true) {
   const f = snapAxis(Math.sin(state.yaw), Math.cos(state.yaw));
   const rt = snapAxis(Math.cos(state.yaw), -Math.sin(state.yaw));
   const s = state.moveStep;
@@ -1410,14 +1412,27 @@ function nudge(forward, right, up) {
     r.pos[0] += (f[0] * forward + rt[0] * right) * s;
     r.pos[1] += (f[1] * forward + rt[1] * right) * s;
     r.pos[2] += up * s;
-  });
+  }, withUndo);
 }
 
-function turn(sign) {
+function turn(sign, withUndo = true) {
   const objs = roots();
   if (!objs.length) return;
   const c = pivotOf(objs), d = sign * state.rotStep * DEG;
-  edit((r) => { r.pos = rotateAround(r.pos, c, d); r.rot[2] = wrapAngle(r.rot[2] + d); });
+  edit((r) => { r.pos = rotateAround(r.pos, c, d); r.rot[2] = wrapAngle(r.rot[2] + d); }, withUndo);
+}
+
+// Tilts about the view's horizontal axis; a positive sign tips the top toward the camera.
+function tilt(sign, withUndo = true) {
+  const objs = roots();
+  if (!objs.length) return;
+  const c = pivotOf(objs);
+  const m = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(Math.cos(state.yaw), -Math.sin(state.yaw), 0),
+                                                 sign * state.rotStep * DEG);
+  edit((r) => {
+    r.pos = new THREE.Vector3(...r.pos).sub(c).applyMatrix4(m).add(c).toArray();
+    r.rot = rotOf(m.clone().multiply(rotMatrix(r.rot)));
+  }, withUndo);
 }
 
 const raycaster = new THREE.Raycaster();
@@ -1438,22 +1453,34 @@ function hits(origin, dir, exclude) {
     .filter((h) => visibleChain(h.object) && !h.object.userData.water && refOf(h.object) !== exclude);
 }
 
-function dropToFloor() {
+// together: all by the same height, as far as the first of them can drop (they keep their formation)
+function dropToFloor(withUndo = true, together = false) {
   const objs = roots();
-  if (!objs.length) return;
+  if (!objs.length) return false;
+  const skip = new Set(together ? objs.flatMap((o) => withAttached(o)) : []);
   const drops = new Map();
   for (const obj of objs) {
     const box = new THREE.Box3().setFromObject(obj);
     const c = box.getCenter(new THREE.Vector3());
     // Cast down from the object's top, so a floor it is sunk into still counts.
-    const under = hits(new THREE.Vector3(c.x, c.y, box.max.z), new THREE.Vector3(0, 0, -1), obj)[0];
-    if (under) drops.set(obj, { dz: under.point.z - box.min.z, onto: refOf(under.object)?.userData.ref.src });
+    const under = hits(new THREE.Vector3(c.x, c.y, box.max.z), new THREE.Vector3(0, 0, -1), obj)
+      .find((h) => !skip.has(refOf(h.object)));
+    if (under) drops.set(obj, { dz: under.point.z - box.min.z, onto: refOf(under.object) });
   }
-  if (!drops.size) { status('Nothing found below to drop onto.', true); return; }
-  edit((r, obj) => { if (drops.has(obj)) r.pos[2] += drops.get(obj).dz; });
-  const [d] = drops.values();
-  status(objs.length === 1 ? `Dropped ${d.dz.toFixed(1)} onto ${d.onto || 'the surface below'}.`
-                           : `Dropped ${drops.size} of ${objs.length} objects onto what's below them.`);
+  if (!drops.size) { status('Nothing found below to drop onto.', true); return false; }
+  if (together) {
+    const dz = Math.max(...[...drops.values()].map((d) => d.dz));
+    edit((r) => { r.pos[2] += dz; }, withUndo !== false);
+    status(`Dropped ${objs.length} objects.`);
+    return true;
+  }
+  edit((r, obj) => { if (drops.has(obj)) r.pos[2] += drops.get(obj).dz; }, withUndo !== false);
+  const [{ onto }] = drops.values();
+  const where = !onto ? 'the ground' : onto.userData.ref.structure ? 'the floor' : onto.userData.ref.src;
+  status(objs.length === 1 ? `Dropped onto ${where}.`
+    : drops.size === objs.length ? `Dropped ${objs.length} objects.`
+    : `Dropped ${drops.size} of ${objs.length} objects; nothing below the others.`);
+  return true;
 }
 
 function lookAtSelected() {
@@ -2239,6 +2266,7 @@ $('swap').addEventListener('click', swapSelected);
 // --- Quick menu (right click / long-press) ----------------------------------
 
 function closeMenu() {
+  state.padMenuBefore = null;
   $('ctxmenu').classList.remove('open');
   if (!$('picker').classList.contains('open')) showAddMarker(null);
 }
@@ -2265,12 +2293,13 @@ function showAddMarker(hit) {
   requestRender();
 }
 
-function openMenuAt(x, y) {
+// own: the menu of that object (the controller's), not of what is under the point; before: the selection it replaced
+function openMenuAt(x, y, own = null, before = []) {
   const [ndcX, ndcY] = ndc(x, y);
   const hit = surfaceAt(ndcX, ndcY);
   const locked = $('lock').checked;
   const obj = hit && refOf(hit.object);
-  const target = obj && !(locked && obj.userData.ref.structure) ? obj : null;
+  const target = own || (obj && !(locked && obj.userData.ref.structure) ? obj : null);
   if (target && !state.selection.includes(target)) select(target);
   const multi = target && state.selection.length > 1 ? state.selection.length : 0;
   const m = $('ctxmenu');
@@ -2288,6 +2317,17 @@ function openMenuAt(x, y) {
     h.className = 'mh';
     h.textContent = multi ? `${multi} objects` : target.userData.ref.src;
     m.appendChild(h);
+    if (own) {
+      const members = groupMembers(own);
+      if (before.includes(own)) {
+        if (before.length > members.length) {
+          item('Remove from the selection', () => setSelection(before.filter((o) => !members.includes(o))));
+        }
+      } else {
+        const rest = before.filter((o) => !members.includes(o));
+        if (rest.length) item(`Add to the selection (${rest.length} selected)`, () => setSelection([...rest, ...members]));
+      }
+    }
     if (!multi && !target.userData.ref.editable) {
       item(state.data.project.standalone ? `Read-only: from ${target.userData.ref.file} (the project is standalone)`
         : `Read-only: from ${target.userData.ref.file}, not a master of ${state.data.project.plugin}`, null);
@@ -2301,6 +2341,17 @@ function openMenuAt(x, y) {
       }
       item(multi ? `Delete ${multi} objects` : 'Delete', removeSelected);
       item('Drop onto surface', dropToFloor);
+      if (own) {
+        item('Fine tune', startFine);
+        const label = () => `Scale  ‹ ${state.selected.userData.ref.scale.toFixed(2)} ›`;
+        item(label(), null);
+        const row = m.lastChild;
+        row.className = 'mi';
+        row.padAdjust = (d, first) => {
+          edit((r) => { r.scale = clampScale(Math.round((r.scale + d * 0.05) * 20) / 20); }, first);
+          row.textContent = label();
+        };
+      }
       item('Reset', resetSelected);
       if (multi) {
         const ga = groupAction();
@@ -2632,7 +2683,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked) state.looking = false;
   state.mouseLook = locked && !state.rightDrag;
   gizmo.enabled = !state.mouseLook;
-  $('crosshair').style.display = state.mouseLook ? 'block' : 'none';
+  updateCrosshair();
   if (state.mouseLook) setFly(true);
   else if (!state.flyPaused) setFly(false);
   resizeLater();
@@ -2802,9 +2853,9 @@ window.addEventListener('blur', () => state.keys.clear());
 
 function fly(dt) {
   const k = state.keys;
-  const joy = state.joy;
-  if (!k.size && !joy.x && !joy.y) return;
-  const fast = k.has('ShiftLeft') || k.has('ShiftRight') ? 4 : 1;
+  const joy = state.joy, pad = state.pad;
+  if (!k.size && !joy.x && !joy.y && !pad.x && !pad.y && !pad.z) return;
+  const fast = (k.has('ShiftLeft') || k.has('ShiftRight') ? 4 : 1) * pad.fast;
   const v = state.speed * fast * dt;
   const d = viewDir();
   const right = new THREE.Vector3(Math.cos(state.yaw), -Math.sin(state.yaw), 0);
@@ -2815,7 +2866,8 @@ function fly(dt) {
   if (k.has('KeyA')) move.sub(right);
   if (k.has('KeyE')) move.z += 1;
   if (k.has('KeyQ')) move.z -= 1;
-  move.addScaledVector(d, joy.y).addScaledVector(right, joy.x);
+  move.addScaledVector(d, joy.y + pad.y).addScaledVector(right, joy.x + pad.x);
+  move.z += pad.z;
   if (move.lengthSq() > 0) {
     requestRender();
     if (move.lengthSq() > 1) move.normalize();
@@ -2823,6 +2875,391 @@ function fly(dt) {
     aimCamera();
   }
 }
+
+// --- Controller ------------------------------------------------------------
+
+const AIM_FAR = 3000;
+const AIM_RINGS = [[0.03, 8], [0.06, 12]];
+const aimBox = new THREE.Box3Helper(new THREE.Box3(), 0x8fc8ff);
+aimBox.visible = false;
+scene.add(aimBox);
+let aimed = null;
+
+function updateCrosshair() {
+  $('crosshair').style.display = state.mouseLook || state.padActive ? 'block' : 'none';
+}
+
+function aimHits(nx, ny) {
+  raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+  raycaster.far = AIM_FAR;
+  const out = raycaster.intersectObjects(world.children, true).filter((h) => visibleChain(h.object) && !h.object.userData.water);
+  raycaster.far = Infinity;
+  return out;
+}
+
+// The object at the crosshair, or else the nearest one beside it on the surface looked at.
+function aimedObject() {
+  camera.updateMatrixWorld();
+  const locked = $('lock').checked;
+  const isStructure = (x) => refOf(x.object)?.userData.ref.structure;
+  const centre = aimHits(0, 0);
+  const first = centre[0];
+  if (first && !isStructure(first)) return refOf(first.object);
+  const near = first ? first.distance + 40 : AIM_FAR;
+  const object = (hs) => hs.find((x) => !isStructure(x) && x.distance < near);
+  if (first && locked && object(centre)) return refOf(object(centre).object);
+  for (const [r, n] of AIM_RINGS) {
+    let best = null;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 2 * Math.PI;
+      const h = object(aimHits(Math.cos(a) * r / camera.aspect, Math.sin(a) * r));
+      if (h && (!best || h.distance < best.distance)) best = h;
+    }
+    if (best) return refOf(best.object);
+  }
+  return first && !locked ? refOf(first.object) : null;
+}
+
+function showAim(obj) {
+  const on = obj && !state.selection.includes(obj) ? obj : null;
+  const box = aimBox.box.clone();
+  if (on) aimBox.box.setFromObject(on);
+  if (on !== aimed || (on && !box.equals(aimBox.box))) requestRender();
+  aimed = on;
+  aimBox.visible = !!on;
+}
+
+function setPadActive(on, hidePanel = false) {
+  state.padActive = on;
+  if (!on) { finishCarry(); endFine(); }
+  padPanel(on && hidePanel);
+  gizmo.enabled = !on && !state.mouseLook;
+  if (!on) showAim(null);
+  updateCrosshair();
+  syncGizmo();
+  requestRender();
+}
+
+// In controller mode the panel can hide; it comes back with the mouse unless it was shown or hidden meanwhile.
+function padPanel(hide) {
+  const hidden = document.body.classList.contains('panel-hidden');
+  if (hide && !hidden) { togglePanel(); state.padHidPanel = true; }
+  else if (!hide && state.padHidPanel) {
+    if (hidden) togglePanel();
+    state.padHidPanel = false;
+  }
+}
+
+function padBlocked() {
+  return ['ctxmenu', 'picker', 'historybox', 'menu'].some((id) => $(id).classList.contains('open'))
+    || npcEditor.isOpen() || !!document.querySelector('.dialog-bg') || !!state.opening;
+}
+
+function closeTop() {
+  if ($('ctxmenu').classList.contains('open')) {
+    const before = state.padMenuBefore;
+    closeMenu();
+    if (before) setSelection(before);
+  } else if ($('picker').classList.contains('open')) closePicker();
+  else if ($('historybox').classList.contains('open')) $('hb-close').click();
+  else if ($('menu').classList.contains('open')) toggleMenu(false);
+  else if (npcEditor.isOpen()) npcEditor.close();
+  else document.querySelector('.dialog.guide .primary')?.click();
+}
+
+function undoNote(u) {
+  const name = (objs) => (objs.length === 1 ? objs[0].userData.ref.src : `${objs.length} objects`);
+  if (u.label) return u.label;
+  if (u.items) {
+    const what = u.items.some((s) => s.rot.some((v, i) => v !== s.obj.userData.ref.rot[i])) ? 'turned'
+      : u.items.some((s) => s.scale !== s.obj.userData.ref.scale) ? 'scaled' : 'moved';
+    return `${what} ${name(u.selection.length ? u.selection : u.items.map((s) => s.obj))}`;
+  }
+  if (u.deleted) return `deleted ${name(u.deleted)}`;
+  if (u.added) return `added ${u.obj.userData.ref.src}`;
+  if (u.copies) return `duplicated ${name(u.copies.map((c) => c.obj))}`;
+  if (u.swaps) return `swapped ${name(u.swaps.map((p) => p.obj))}`;
+  if (u.attaches) return 'attaching';
+  if (u.groups) return 'grouping';
+  if (u.doors) return 'a door destination';
+  return '';
+}
+
+function padUndo() {
+  const u = state.undo[state.undo.length - 1];
+  if (!u) { status('Nothing to undo.'); return; }
+  const note = undoNote(u);
+  undo();
+  if (!u.stale && !u.trimmed && !u.npcs && !u.dialogue) status(note ? `Undone: ${note}.` : 'Undone.');
+}
+
+function padRedo() {
+  const r = state.undo.length > state.undoMark ? null : state.redo[state.redo.length - 1];
+  const n = state.undo.length;
+  redo();
+  if (!r) status('Nothing to redo.');
+  else if (!r.stale && !r.trimmed && state.undo.length > n) status('Redone.');
+}
+
+function boxOf(objs) {
+  const b = new THREE.Box3();
+  for (const o of objs) b.union(new THREE.Box3().setFromObject(o));
+  return b;
+}
+
+// Carrying: the selection keeps its place on the screen (RS click: the crosshair) at a distance (LT/RT change it),
+// resting on a surface that comes nearer (not in free float, which several objects always are: they keep their
+// formation).
+// An object added by the controller is carried at once; its add is the undo step, a move joins into one.
+function startCarry(added = null) {
+  const objs = roots();
+  if (!objs.length) return;
+  const centre = boxOf(objs).getCenter(new THREE.Vector3());
+  const dist = Math.max(60, camera.position.distanceTo(centre));
+  camera.updateMatrixWorld();
+  const p = centre.clone().project(camera);
+  const clamp = (v) => Math.max(-0.9, Math.min(0.9, v));
+  state.carry = { objs, added, from: state.undo.length - (added ? 1 : 0), before: added ? null : entriesOf(state.edits),
+                  free: objs.length > 1, start: centre, dist, at: new THREE.Vector2(clamp(p.x), clamp(p.y)),
+                  skip: new Set(objs.flatMap((o) => withAttached(o))) };
+  showAim(null);
+}
+
+function carryHit(origin, dir, far, skip) {
+  raycaster.set(origin, dir);
+  raycaster.far = far;
+  const hit = raycaster.intersectObjects(world.children, true)
+    .find((h) => visibleChain(h.object) && !h.object.userData.water && !skip.has(refOf(h.object)));
+  raycaster.far = Infinity;
+  return hit;
+}
+
+function carryTo() {
+  const c = state.carry;
+  if (!c) return;
+  const box = boxOf(c.objs);
+  const centre = box.getCenter(new THREE.Vector3()), half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+  camera.updateMatrixWorld();
+  raycaster.setFromCamera(c.at, camera);
+  const dir = raycaster.ray.direction.clone();
+  let t = c.dist;
+  if (!c.free) {
+    // Pulled back along the ray until the box touches the surface the ray meets.
+    const hit = carryHit(camera.position, dir, c.dist + half.x + half.y + half.z, c.skip);
+    if (hit && hit.face) {
+      const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      if (n.dot(dir) > 0) n.negate();
+      const along = -n.dot(dir);
+      const reach = Math.abs(half.x * n.x) + Math.abs(half.y * n.y) + Math.abs(half.z * n.z);
+      if (along > 1e-3) t = Math.max(0, Math.min(t, (n.dot(camera.position.clone().sub(hit.point)) - reach) / along));
+    }
+  }
+  const to = camera.position.clone().addScaledVector(dir, t);
+  if ($('snap').checked) {
+    const s = state.moveStep, snap = (v, v0) => v0 + Math.round((v - v0) / s) * s;
+    to.x = snap(to.x, c.start.x);
+    to.y = snap(to.y, c.start.y);
+    if (c.free) to.z = snap(to.z, c.start.z);
+  }
+  if (!c.free) {
+    // Never below the surface under it.
+    const under = carryHit(new THREE.Vector3(to.x, to.y, to.z + half.z), new THREE.Vector3(0, 0, -1), 2 * half.z, c.skip);
+    if (under) to.z = under.point.z + half.z;
+  }
+  const d = to.sub(centre);
+  if (d.lengthSq() < 1e-4) return;
+  edit((r) => { r.pos = [r.pos[0] + d.x, r.pos[1] + d.y, r.pos[2] + d.z]; }, false);
+}
+
+function finishCarry(quiet = false) {
+  const c = state.carry;
+  if (!c) return;
+  state.carry = null;
+  const name = c.objs.length === 1 ? c.objs[0].userData.ref.src : `${c.objs.length} objects`;
+  for (const o of c.objs) {
+    const k = o.userData.ref.key;
+    if (!(c.added?.attach || state.edits.attached[k])) continue;
+    const { under } = objectBelow(o);
+    if (under) state.edits.attached[k] = under.userData.ref.key; else delete state.edits.attached[k];
+  }
+  if (!c.added) {
+    joinSteps(c.from, c.before);
+    if (state.undo.length > c.from) state.undo[state.undo.length - 1].label = `moved ${name}`;
+  }
+  updateDirty();
+  updatePanel();
+  if (!quiet) status(`${c.added ? 'Placed' : 'Moved'} ${name}.`);
+}
+
+function carryStep(tiltSign, turnSign) {
+  if (!state.carry) return;
+  if (tiltSign) tilt(tiltSign, false);
+  if (turnSign) turn(turnSign, false);
+  carryTo();
+}
+
+// Fine tune: the D-pad moves the selection by the steps while flying leaves it; the session is one undo step.
+function startFine() {
+  finishCarry();
+  if (!roots().length) return;
+  state.fine = { from: state.undo.length, before: entriesOf(state.edits) };
+  status('Fine tune: the arrows move the object. B to finish.');
+}
+
+function fineStep(i, lt) {
+  const [f, r] = { up: [1, 0], down: [-1, 0], left: [0, -1], right: [0, 1] }[i];
+  if (lt && r) turn(r, false);
+  else if (lt) nudge(0, 0, f, false);
+  else nudge(f, r, 0, false);
+}
+
+function endFine() {
+  const f = state.fine;
+  if (!f) return;
+  state.fine = null;
+  const objs = roots();
+  joinSteps(f.from, f.before);
+  if (state.undo.length > f.from) {
+    state.undo[state.undo.length - 1].label = `moved ${objs.length === 1 ? objs[0].userData.ref.src : `${objs.length} objects`}`;
+  }
+  updateDirty();
+  select(null);
+}
+
+function carryCentre() {
+  const c = state.carry;
+  if (!c) return;
+  c.at.set(0, 0);
+  carryTo();
+}
+
+function carryDistance(f) {
+  const c = state.carry;
+  if (!c || !f) return;
+  c.dist = Math.min(c.dist, camera.position.distanceTo(boxOf(c.objs).getCenter(new THREE.Vector3())));
+  c.dist = Math.max(40, Math.min(AIM_FAR, c.dist + f * Math.max(100, c.dist)));
+  carryTo();
+}
+
+function carryDrop() {
+  if (!state.carry || !dropToFloor(false, state.carry.objs.length > 1)) return false;
+  finishCarry(true);
+  return true;
+}
+
+function carryFree() {
+  const c = state.carry;
+  if (!c || c.objs.length > 1) return;
+  c.free = !c.free;
+  if (c.free) c.dist = Math.max(60, camera.position.distanceTo(boxOf(c.objs).getCenter(new THREE.Vector3())));
+  status(c.free ? 'Free float on: passes through walls.' : 'Free float off.');
+  carryTo();
+}
+
+// Add object from the controller: the picker, then the new object is carried from the crosshair.
+async function padAdd() {
+  if (!state.cell) return;
+  const why = cantAdd();
+  if (why) { status(why, true); return; }
+  $('pk-search').value = '';
+  const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
+  await pickObject('Add object', true, (o) => carryNew(o, pickedOptions()), true, 'Add',
+                   group ? state.edits.groups[group].length : 0);
+  $('pk-search').blur();
+}
+
+function carryNew(o, opts) {
+  if (!state.padActive) { startPlacing('object', { o, opts }); return; }
+  const hit = surfaceAt(0, 0) || { point: camera.position.clone().addScaledVector(viewDir(), 200), face: null, object: null };
+  const from = state.undo.length;
+  addAt(hit, 'object', { o, opts, then: () => { if (state.undo.length > from && state.selection.length) startCarry(opts); } });
+}
+
+const padPicker = {
+  open: () => $('picker').classList.contains('open'),
+  move(dx, dy) {
+    if (!picker.items.length) return;
+    const cols = gridView() ? getComputedStyle($('pk-list')).gridTemplateColumns.split(' ').length : 1;
+    const d = dy * cols + dx * (gridView() ? 1 : 10);
+    highlight(Math.max(0, Math.min(picker.items.length - 1, picker.sel + d)));
+  },
+  pick() { if (picker.items[picker.sel]) pick(picker.items[picker.sel]); },
+  category(d) {
+    const t = $('pk-type'), n = t.options.length;
+    t.selectedIndex = (t.selectedIndex + d + n) % n;
+    t.dispatchEvent(new Event('change'));
+  },
+  categoryName: () => $('pk-type').selectedOptions[0]?.textContent || 'All',
+  categories: () => [...$('pk-type').options].map((o) => o.textContent),
+  categoryAt: () => $('pk-type').selectedIndex,
+  setCategory(i) {
+    $('pk-type').selectedIndex = i;
+    $('pk-type').dispatchEvent(new Event('change'));
+  },
+  views: () => $('pk-views').style.display !== 'none',
+  grid: () => gridView(),
+  toggleView() { if ($('pk-views').style.display !== 'none') $(gridView() ? 'pk-view-list' : 'pk-view-grid').click(); },
+  async favourite() {
+    const o = picker.items[picker.sel];
+    if (!o || !picker.star) return;
+    await picker.star.toggle(o);
+    picker.paints.get(o)?.();
+    paintPreviewStar();
+  },
+};
+
+function stepMoveStep(d) {
+  const i = MOVE_STEPS.indexOf(state.moveStep);
+  state.moveStep = MOVE_STEPS[Math.max(0, Math.min(MOVE_STEPS.length - 1, (i < 0 ? 3 : i) + d))];
+  $('move-step').value = state.moveStep;
+  updateSnap();
+  status(`Move step: ${state.moveStep} units.`);
+}
+
+const padInput = setupGamepad({
+  state, status, select, stopPlacing,
+  active: setPadActive, blocked: padBlocked, closeTop, undo: padUndo, redo: padRedo, moveStep: stepMoveStep,
+  add: padAdd, picker: padPicker, group: groupButton, groupAction, save, history: showHistory, guide: showGuide,
+  actions(o) {
+    const r = canvas.getBoundingClientRect();
+    const before = [...state.selection];
+    if (!before.includes(o)) select(o);
+    openMenuAt(r.left + r.width / 2, r.top + r.height / 2, o, before);
+    state.padMenuBefore = before;
+  },
+  options: {
+    lock: () => $('lock').checked,
+    toggleLock() { $('lock').checked = !$('lock').checked; lockChanged(); },
+    light: () => gameLight.on,
+    toggleLight: () => $('light-btn').click(),
+    snap: () => $('snap').checked,
+    toggleSnap() { $('snap').checked = !$('snap').checked; updateSnap(); },
+    panel: () => !document.body.classList.contains('panel-hidden'),
+    togglePanel() { togglePanel(); state.padHidPanel = false; },
+    rotStep(d) {
+      const i = ROT_STEPS.indexOf(state.rotStep);
+      state.rotStep = ROT_STEPS[Math.max(0, Math.min(ROT_STEPS.length - 1, (i < 0 ? 2 : i) + d))];
+      $('rot-step').value = state.rotStep;
+      updateSnap();
+    },
+    speed: (d) => setSpeed(state.speed * (d > 0 ? 1.25 : 0.8)),
+  },
+  carry: { start: () => startCarry(), to: carryTo, finish: finishCarry, step: carryStep, free: carryFree,
+           distance: carryDistance, drop: carryDrop, centre: carryCentre },
+  fine: { step: fineStep, end: endFine },
+  hidePanel: padPanel,
+  look(dYaw, dPitch) {
+    state.yaw += dYaw;
+    state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch + dPitch));
+    aimCamera();
+  },
+  viewKey: () => [...camera.position.toArray().map(Math.round), state.yaw.toFixed(3), state.pitch.toFixed(3),
+                  state.selection.length].join(','),
+  aim() { const o = aimedObject(); showAim(o); return o; },
+  marker: () => showAddMarker(surfaceAt(0, 0)),
+  place: () => placeAt(0, 0),
+  dest: finishDestPick,
+});
 
 // --- Touch -----------------------------------------------------------------
 
@@ -3554,7 +3991,7 @@ function take(ops, from, step = null) {
   // device's change instead drops what the undo steps would put back over it.
   if (changed.length) showChanges(changed, !step);
   if (step && back.length) {
-    state.undo.push({ diff: back });
+    state.undo.push({ diff: back, label: step.label });
     status(`${step.label}. Undo takes it back.`);
   }
   syncSoon();
@@ -3887,6 +4324,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  try { padInput.update(dt); } catch (err) { console.error(err); }
   fly(dt);
   sendWhere(now);
   if (needsRender || gizmo.dragging) {
