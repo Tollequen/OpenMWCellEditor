@@ -29,7 +29,7 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
 
 ---
 
-## Standout Features
+## Main Features
 
 - **Intuitive 3D Furnishing**:
   - **Drop onto Surface (`G`)**: Drops hovered clutter directly onto tables, shelves, or floors.
@@ -48,14 +48,15 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
   - Go to **Settings > Open on another device...** to reveal a local QR code and PIN.
   - Scan with your phone or tablet to use the editor with touch controls.
 
+- **Controller Support**:
+  - Use your controller to navigate and edit the world.  
+
 - **Real-Time LAN Co-Op**:
   - Multiple devices or computers on the same local Wi-Fi can join the same project session.
   - See collaborators' live presence markers and colored selection boxes update in real time.
 
 - **Clean & Safe OpenMW Plugins**:
   - Edit existing plugins in place (like OpenMW-CS) or generate clean override patches.
-  - Leaves untouched records (NPCs, dialogue, scripts, other cells) byte-for-byte identical.
-  - Automatically manages master dependencies and maintains stable reference IDs (`FRMR`).
   - Keeps 10 rolling plugin backups and recovers unsaved drafts if closed accidentally.
 
 ---
