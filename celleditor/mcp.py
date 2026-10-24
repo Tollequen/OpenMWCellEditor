@@ -8,7 +8,6 @@ import json
 import math
 import os
 import random
-import re
 import string
 import time
 
@@ -17,7 +16,6 @@ from .live import LIVE
 
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 PAGE = "mcp"
-TIER = re.compile(r"^([a-z]+)(\d)(o?)$")
 client = {"name": "Assistant"}
 
 INSTRUCTIONS = """Tools for the OpenMW Cell Editor that the user has open: look at a Morrowind cell, take
@@ -27,8 +25,7 @@ tall). Rotations are degrees, clockwise seen from above; z is the heading (0 = f
 Edits appear in the user's editor right away, unsaved. Each call is one step the user can undo, and the
 note you give is shown to them. Don't save unless the user asks. Objects are named by key (from
 list_objects or editor_context); place_objects takes object ids (search with find_object_ids).
-Projects with upgrade tiers (nooks) hide objects by tier: an object's "tier" is e.g. "ic1" (shown from tier
-1 of nook ic up) or "ic0o" (only at tier 0)."""
+Some projects tag objects ("tag") and show only some tags at a time: the page's "view" decides which."""
 
 
 # --- Helpers ---------------------------------------------------------------------------------
@@ -69,17 +66,13 @@ def _vec(v, name):
     return [float(a) for a in v]
 
 
-def _tier_name(r):
-    if not r.get("nook"):
-        return None
-    return "%s%d%s" % (r["nook"], r["tier"], "o" if r.get("only") else "")
-
-
-def _shown(r, tiers):
-    if not r.get("nook"):
+def _shown(project, r, view):
+    if not r.get("tag"):
         return True
-    t = tiers.get(r["nook"], 0)
-    return t == r["tier"] if r.get("only") else t >= r["tier"]
+    try:
+        return project.shown(r["tag"], view)
+    except ValueError:
+        return True
 
 
 def _page():
@@ -98,7 +91,7 @@ def _cell_name(args):
 class Cell:
     """A cell as the editor shows it now (with the unsaved edits)."""
 
-    def __init__(self, name, tiers=None):
+    def __init__(self, name, view=None):
         S = _srv()
         self.S = S
         self.edits = LIVE.edits()
@@ -109,15 +102,8 @@ class Cell:
         self.name = self.data["name"]
         deleted = set(self.edits.get("deleted") or [])
         self.refs = [r for r in self.data["refs"] if r["key"] not in deleted]
-        top = {}
-        for r in self.refs:
-            if r.get("nook"):
-                top[r["nook"]] = max(top.get(r["nook"], 0), r["tier"])
-        shown = _page()[1]
-        self.tiers = dict(top)
-        if shown.get("cell") == self.name:
-            self.tiers.update(shown.get("tiers") or {})
-        self.tiers.update(tiers or {})
+        self.view = dict(_page()[1].get("view") or {})
+        self.view.update(view or {})
         self.by_key = {r["key"]: r for r in self.refs}
 
     def shape(self, r):
@@ -127,7 +113,10 @@ class Cell:
 
     def solid(self, skip=()):
         return [(r, self.shape(r)) for r in self.refs
-                if r["kind"] == "mesh" and _shown(r, self.tiers) and r["key"] not in skip]
+                if r["kind"] == "mesh" and self.shown(r) and r["key"] not in skip]
+
+    def shown(self, r):
+        return _shown(self.S.project, r, self.view)
 
     def describe(self, r):
         lo, hi = geometry.world_box(r, self.shape(r))
@@ -137,11 +126,10 @@ class Cell:
             out["scale"] = round(r["scale"], 3)
         if r["src"].lower() != r["id"].lower():
             out["copy_of"] = r["src"]
-        t = _tier_name(r)
-        if t:
-            out["tier"] = t
-            if not _shown(r, self.tiers):
-                out["hidden_at_these_tiers"] = True
+        if r.get("tag"):
+            out["tag"] = r["tag"]
+            if not self.shown(r):
+                out["hidden_in_this_view"] = True
         if r["origin"] != "mod":
             out["origin"] = r["origin"]
         if r.get("structure"):
@@ -190,15 +178,14 @@ def _drop_z(cell, r, sh, skip):
     return r["pos"][2] + h["point"][2] - lo[2]
 
 
-def _tier_ok(cell, tier):
-    if tier is None:
+def _tag_ok(cell, tag):
+    if tag is None:
         return None
-    m = TIER.match(str(tier))
-    nooks = set(getattr(cell.S.project, "nooks", {}) or {}) | {r["nook"] for r in cell.refs if r.get("nook")}
-    if not m or m.group(1) not in nooks:
-        raise ToolError("tier %r: give e.g. %r (nooks: %s)" % (tier, (sorted(nooks) or ["x"])[0] + "1",
-                                                           ", ".join(sorted(nooks)) or "none in this project"))
-    return tier
+    try:
+        cell.S.project.shown(str(tag), cell.view)
+    except ValueError as e:
+        raise ToolError("tag %r: %s" % (tag, e))
+    return str(tag)
 
 
 # --- Tools ---------------------------------------------------------------------------------------
@@ -210,8 +197,8 @@ def t_context(args):
         info = {"cell": p["cell"], "camera": {"pos": _r(p.get("pos") or [0, 0, 0], 0),
                                               "yaw": round(math.degrees(p.get("yaw") or 0) % 360, 1),
                                               "pitch": round(math.degrees(p.get("pitch") or 0), 1)}}
-        if p.get("tiers"):
-            info["tiers"] = p["tiers"]
+        if p.get("view"):
+            info["view"] = p["view"]
         if p.get("sel"):
             try:
                 cell = Cell(p["cell"])
@@ -219,16 +206,13 @@ def t_context(args):
             except ToolError:
                 info["selected"] = p["sel"]
         pages.append(info)
-    nooks = getattr(S.project, "nooks", {}) or {}
     out = {"project": S.project.name, "plugin": os.path.basename(S.project.plugin), "unsaved_changes": LIVE.unsaved(),
            "editor_pages": pages or "No editor page is open on this computer."}
-    if nooks:
-        out["nooks"] = nooks
     return json.dumps(out)
 
 
 def t_list(args):
-    cell = Cell(_cell_name(args), args.get("tiers"))
+    cell = Cell(_cell_name(args), args.get("view"))
     near = _vec(args["near"], "near") if args.get("near") else None
     radius = float(args.get("radius") or 0)
     match = (args.get("match") or "").lower()
@@ -240,14 +224,14 @@ def t_list(args):
         lo, hi = _vec(box[0], "box min"), _vec(box[1], "box max")
         refs = [r for r in refs if all(lo[i] <= r["pos"][i] <= hi[i] for i in range(3))]
     if not args.get("include_hidden"):
-        refs = [r for r in refs if _shown(r, cell.tiers)]
+        refs = [r for r in refs if cell.shown(r)]
     if near:
         dist = {r["key"]: math.sqrt(sum((a - b) ** 2 for a, b in zip(near, r["pos"]))) for r in refs}
         if radius:
             refs = [r for r in refs if dist[r["key"]] <= radius]
         refs.sort(key=lambda r: dist[r["key"]])
     limit = int(args.get("limit") or 60)
-    out = {"cell": cell.name, "tiers": cell.tiers, "count": len(refs),
+    out = {"cell": cell.name, "count": len(refs),
            "objects": [cell.describe(r) for r in refs[:limit]]}
     if len(refs) > limit:
         out["more"] = "%d more; narrow with near/radius, box or match" % (len(refs) - limit)
@@ -255,7 +239,7 @@ def t_list(args):
 
 
 def t_raycast(args):
-    cell = Cell(_cell_name(args), args.get("tiers"))
+    cell = Cell(_cell_name(args), args.get("view"))
     o = _vec(args["from"], "from")
     d = _vec(args.get("direction") or [0, 0, -1], "direction")
     h = cell.hit(o, d, set(args.get("ignore") or []), float(args.get("max_distance") or 20000))
@@ -295,14 +279,13 @@ def t_place(args):
         if not m:
             raise ToolError("objects[%d]: no object %r (find_object_ids searches)" % (i, oid))
         oid = next((c["id"] for c in json.loads(S._catalog) if c["id"].lower() == oid.lower()), oid)
-        tier = _tier_ok(cell, o.get("tier"))
+        tag = _tag_ok(cell, o.get("tag"))
         uid = _uid()
         r = {"key": "added|" + uid, "id": oid, "src": oid, "kind": "npc" if m[0] == "NPC_" else "mesh" if m[1] else "light",
              "mesh": m[1], "pos": _vec(o.get("pos"), "objects[%d].pos" % i), "rot": _rad_rot(o.get("rot")),
              "scale": min(2.0, max(0.5, float(o.get("scale") or 1.0))), "origin": "added"}
-        if tier:
-            tm = TIER.match(tier)
-            r.update(nook=tm.group(1), tier=int(tm.group(2)), only=bool(tm.group(3)))
+        if tag:
+            r["tag"] = tag
         if o.get("drop"):
             z = _drop_z(cell, r, cell.shape(r), ())
             if z is None:
@@ -310,7 +293,7 @@ def t_place(args):
             else:
                 r["pos"][2] = z
         entry = {"uid": uid, "cell": cell.name, "id": oid, "pos": r["pos"], "rot": r["rot"],
-                 "scale": r["scale"], "tier": tier}
+                 "scale": r["scale"], "tag": tag}
         ops.append({"id": "added|" + uid, "v": entry})
         cell.refs.append(r)
         cell.by_key[r["key"]] = r
@@ -395,16 +378,16 @@ def t_delete(args):
     return json.dumps({"deleted": args["keys"]})
 
 
-def t_set_tier(args):
+def t_set_tag(args):
     key = args.get("key") or ""
     edits = LIVE.edits()
     a = next((a for a in edits.get("added") or [] if "added|" + a["uid"] == key), None)
     if not a:
-        raise ToolError("Only added objects (keys 'added|...') can change tier.")
+        raise ToolError("Only added objects (keys 'added|...') can change tag.")
     cell = Cell(a["cell"])
-    a = dict(a, tier=_tier_ok(cell, args.get("tier")))
-    _send([{"id": key, "v": a}], args.get("note") or "%s now in tier %s" % (a["id"], a["tier"] or "always"))
-    return json.dumps({"key": key, "tier": a["tier"]})
+    a = dict(a, tag=_tag_ok(cell, args.get("tag")))
+    _send([{"id": key, "v": a}], args.get("note") or "%s tagged %s" % (a["id"], a["tag"] or "none"))
+    return json.dumps({"key": key, "tag": a["tag"]})
 
 
 def t_view(args):
@@ -429,8 +412,8 @@ def t_view(args):
             ask["yaw"] = math.radians(float(args["yaw"]))
         if args.get("pitch") is not None:
             ask["pitch"] = math.radians(float(args["pitch"]))
-    if args.get("tiers"):
-        ask["tiers"] = args["tiers"]
+    if args.get("view"):
+        ask["view"] = args["view"]
     ans = LIVE.ask(page, ask)
     if ans is None:
         raise ToolError("The editor page didn't answer (is it open and not frozen?).")
@@ -453,29 +436,28 @@ def t_save(args):
 V3 = {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
 ROT = {"description": "degrees: a number (the heading, clockwise from north) or [x, y, z]",
        "anyOf": [{"type": "number"}, V3]}
-TIERS = {"type": "object", "additionalProperties": {"type": "integer"},
-         "description": "tier per nook to assume, e.g. {\"hal\": 1}; default: what the user's editor shows"}
+VIEW = {"type": "object", "description": "the project's view to assume (as editor_context shows it), over the user's"}
 NOTE = {"type": "string", "description": "a few words shown to the user, e.g. 'candles on the altar'"}
 CELL = {"type": "string", "description": "cell name; default: the one the user's editor shows"}
 READ = {"readOnlyHint": True, "openWorldHint": False}
 EDIT = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}
 
 TOOLS = [
-    ("editor_context", "Where the user is: the open project, each editor page's cell, camera, upgrade tiers "
+    ("editor_context", "Where the user is: the open project, each editor page's cell, camera, view "
      "and selected objects, and how many changes are unsaved.", {}, [], READ, t_context),
     ("list_objects", "Objects in a cell as the editor shows them (with unsaved edits): key, id, position, "
-     "rotation (degrees), world box [min, max], tier. Nearest first with near.",
+     "rotation (degrees), world box [min, max], tag. Nearest first with near.",
      {"cell": CELL, "near": dict(V3, description="sort by distance from this point"),
       "radius": {"type": "number", "description": "with near: only this close"},
       "box": {"type": "array", "items": V3, "minItems": 2, "maxItems": 2, "description": "[min, max] of positions"},
       "match": {"type": "string", "description": "part of the id or key"},
-      "tiers": TIERS, "include_hidden": {"type": "boolean", "description": "also objects hidden at these tiers"},
+      "view": VIEW, "include_hidden": {"type": "boolean", "description": "also objects hidden in this view"},
       "limit": {"type": "integer", "description": "default 60"}}, [], READ, t_list),
     ("raycast", "The first surface a ray hits (object meshes, and terrain outside): point, distance, surface "
      "normal and the object. Straight down by default, e.g. to find a floor or table top.",
      {"cell": CELL, "from": V3, "direction": dict(V3, description="default [0, 0, -1]"),
       "ignore": {"type": "array", "items": {"type": "string"}, "description": "object keys to look through"},
-      "max_distance": {"type": "number"}, "tiers": TIERS}, ["from"], READ, t_raycast),
+      "max_distance": {"type": "number"}, "view": VIEW}, ["from"], READ, t_raycast),
     ("find_object_ids", "Search the placeable objects (ids, names) of the project's content files.",
      {"query": {"type": "string", "description": "words that must all appear in the id or name"},
       "type": {"type": "string", "description": "e.g. Static, Light, Misc, Container, Activator, Door"},
@@ -485,14 +467,14 @@ TOOLS = [
      "yellow boxes.",
      {"pos": dict(V3, description="camera position"), "look_at": dict(V3, description="aim the camera here"),
       "yaw": {"type": "number", "description": "degrees clockwise from north"},
-      "pitch": {"type": "number", "description": "degrees up (negative: down)"}, "tiers": TIERS,
+      "pitch": {"type": "number", "description": "degrees up (negative: down)"}, "view": VIEW,
       "width": {"type": "integer", "description": "pixels, default 1024"},
       "cell": {"type": "string", "description": "check that the editor shows this cell"}}, [], READ, t_view),
     ("place_objects", "Add objects (one undo step for the user). drop: lower each onto the first surface "
      "below its pos, so pos can be a little above a table (objects placed earlier in the call count).",
      {"cell": CELL, "objects": {"type": "array", "items": {"type": "object", "properties": {
          "id": {"type": "string"}, "pos": V3, "rot": ROT, "scale": {"type": "number"},
-         "tier": {"type": "string", "description": "e.g. 'ic1'; default: always there"},
+         "tag": {"type": "string", "description": "the project's tag; default: none"},
          "drop": {"type": "boolean"}}, "required": ["id", "pos"]}}, "note": NOTE},
      ["objects"], EDIT, t_place),
     ("move_objects", "Move, turn or scale objects by key (one undo step). pos/rot set; offset/turn add; "
@@ -505,9 +487,9 @@ TOOLS = [
     ("delete_objects", "Delete objects by key (one undo step).",
      {"keys": {"type": "array", "items": {"type": "string"}}, "note": NOTE}, ["keys"],
      dict(EDIT, destructiveHint=True), t_delete),
-    ("set_tier", "Put an added object in an upgrade tier, or null for always there (one undo step).",
-     {"key": {"type": "string"}, "tier": {"type": ["string", "null"]}, "note": NOTE}, ["key", "tier"],
-     EDIT, t_set_tier),
+    ("set_tag", "Set an added object's project tag, or null for none (one undo step).",
+     {"key": {"type": "string"}, "tag": {"type": ["string", "null"]}, "note": NOTE}, ["key", "tag"],
+     EDIT, t_set_tag),
     ("save", "Save the edits and build the plugin, as the user's Save button does. Only when the user asks.",
      {"label": {"type": "string", "description": "a name for the saved version"}}, [],
      dict(EDIT, destructiveHint=True), t_save),

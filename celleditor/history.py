@@ -59,8 +59,9 @@ def diff(old, new):
 
 
 class History:
-    def __init__(self, folder):
+    def __init__(self, folder, migrate=None):
         self.folder = folder
+        self.migrate = migrate or (lambda e: e)
 
     def versions(self):
         if not os.path.isdir(self.folder):
@@ -74,7 +75,7 @@ class History:
         e = empty_edits()
         with open(os.path.join(self.folder, name)) as f:
             e.update(json.load(f))
-        return e
+        return self.migrate(e)
 
     def snapshot(self, edits, label=""):
         """Keep a copy of a saved layout unless it's the same as the last one."""

@@ -106,8 +106,6 @@
   details.fold > .body { padding: 0 12px 12px; }
   label.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
   label.opt input[type=number] { width: 80px; }
-  #sel-tier { width: 100%; }
-  #tiers label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
   .keys { color: var(--dim); font-size: 12px; line-height: 1.7; }
   .keys b { color: var(--text); font-weight: 600; }
   .note { color: var(--dim); font-size: 12px; }
@@ -383,6 +381,22 @@
   body.touch.bar-hidden #show-panel { display: inline-flex; top: auto; bottom: calc(18px + env(safe-area-inset-bottom));
                                       left: 50%; transform: translateX(-50%); }
   body.touch #ctxmenu .mi { padding: 11px 14px; font-size: 16px; }
+
+  /* The project's own panel (Project.panel) */
+  #projbox { position: fixed; inset: 0; background: rgba(10, 10, 12, .6); display: none; z-index: 10; }
+  #projbox.open { display: flex; align-items: center; justify-content: center; }
+  #proj-box { width: min(1320px, 96vw); height: min(880px, 94vh); background: var(--panel); border: 1px solid var(--line);
+              border-radius: 6px; display: flex; flex-direction: column; box-shadow: var(--shadow); box-sizing: border-box;
+              -webkit-user-select: text; user-select: text; }
+  #proj-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #proj-top .t { font-weight: 600; font-size: 15px; }
+  #proj-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  #proj-body:focus { outline: none; }
+  @media (max-width: 760px) {
+    #projbox.open { align-items: stretch; }
+    #proj-box { width: 100vw; height: 100vh; height: 100dvh; border: none; border-radius: 0; }
+    #proj-top { padding: 6px 10px; }
+  }
 
   /* NPC editor */
   #npcbox { position: fixed; inset: 0; background: rgba(10, 10, 12, .6); display: none; z-index: 10; }
@@ -660,11 +674,8 @@
   <details id="mod-section" class="fold" style="display:none">
     <summary id="mod-summary">Mod</summary>
     <div class="body">
-      <div class="note" style="margin-bottom:4px">Upgrade tiers shown</div>
-      <div id="tiers"></div>
-      <div class="note" style="margin:10px 0 4px">Selected object's tier</div>
-      <select id="sel-tier"></select>
-      <div class="note" id="sel-tier-note" style="margin-top:4px"></div>
+      <div class="row" id="proj-open-row" style="display:none;margin:0 0 10px"><button id="proj-open" style="display:none"></button></div>
+      <div id="proj-side"></div>
     </div>
   </details>
   <details id="controls-help" class="fold">
@@ -717,10 +728,6 @@
     </div>
     <label id="pk-attach-row" class="check" style="display:none"><input type="checkbox" id="pk-attach" checked> <span id="pk-attach-label">Attach to the object below</span></label>
     <label id="pk-group-row" class="check" style="display:none"><input type="checkbox" id="pk-group" checked> <span id="pk-group-label">Add to the group</span></label>
-    <details id="pk-mod" class="fold" style="display:none">
-      <summary id="pk-mod-summary">Mod options</summary>
-      <div class="body"><label class="opt">Belongs to <select id="pk-tier"></select></label></div>
-    </details>
     <div id="pk-count"></div>
     <div id="pk-main">
       <div id="pk-list"></div>
@@ -759,6 +766,13 @@
     <div class="pk-row"><span id="hb-title">History</span><span style="flex:1"></span><button id="hb-close">Close</button></div>
     <div id="hb-note" class="note"></div>
     <div id="hb-list"></div>
+  </div>
+</div>
+<div id="projbox">
+  <div id="proj-box">
+    <div id="proj-top"><span class="t" id="proj-title"></span><span class="spacer"></span>
+      <button id="proj-close">Close</button></div>
+    <div id="proj-body" tabindex="-1"></div>
   </div>
 </div>
 <div id="npcbox">

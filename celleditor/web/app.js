@@ -26,7 +26,7 @@ const ROT_STEPS = [1, 5, 15, 45, 90];
 const DEG = Math.PI / 180;
 
 const state = {
-  data: null, cell: null, tiers: {}, edits: { moved: {}, deleted: [] },
+  data: null, cell: null, view: {}, newTag: null, edits: { moved: {}, deleted: [] },
   selected: null, selection: [], undo: [], redo: [], undoMark: 0, moveStep: 8, rotStep: 15, dirty: false,
   yaw: 0, pitch: 0, speed: 400, sensitivity: 3, joy: { x: 0, y: 0 }, keys: new Set(), looking: false,
 };
@@ -487,12 +487,13 @@ function applyTransform(obj) {
   obj.updateMatrixWorld(true);
 }
 
-// --- Cells and tiers --------------------------------------------------------
+// --- Cells -----------------------------------------------------------------
 
-function shownAtTiers(r) {
-  if (!r.nook) return true;
-  const t = state.tiers[r.nook] || 0;
-  return r.only ? t === r.tier : t >= r.tier;
+// a tagged object shows unless the project's module says otherwise for the view
+function shownInView(r) {
+  const fn = projectPanel.mod?.shown;
+  if (!r.tag || !fn) return true;
+  try { return fn(r.tag, state.view) !== false; } catch (err) { return true; }
 }
 
 function refreshVisibility() {
@@ -500,7 +501,7 @@ function refreshVisibility() {
   const deleted = new Set(state.edits.deleted);
   for (const obj of world.children) {
     const r = obj.userData.ref;
-    if (r) obj.visible = shownAtTiers(r) && !deleted.has(r.key);
+    if (r) obj.visible = shownInView(r) && !deleted.has(r.key);
   }
   if (state.selection.some((o) => !o.visible)) setSelection(state.selection);
 }
@@ -528,8 +529,6 @@ async function makeObject(r) {
   return obj;
 }
 
-let NOOK_NAMES = {};
-
 function setupProject() {
   const p = state.data.project;
   setGameLight(gameLight.on);
@@ -541,22 +540,14 @@ function setupProject() {
     const arrow = $('menu-btn').querySelector('svg');
     if (arrow) arrow.style.display = 'none';
   }
-  NOOK_NAMES = (p && p.nooks) || {};
-  const hasTiers = !!p && Object.keys(state.data.nooks || {}).length > 0;
-  $('mod-section').style.display = hasTiers ? '' : 'none';
-  if (!hasTiers) return;
+  $('mod-section').style.display = p?.panel ? '' : 'none';
+  if (!p?.panel) return;
+  setupProjectPanel(p.panel);
   $('mod-summary').textContent = `${p.name} mod`;
   try { $('mod-section').open = stored('ce-mod-open') === '1'; } catch (err) { /* private mode */ }
   $('mod-section').addEventListener('toggle', () => {
     try { localStorage.setItem('ce-mod-open', $('mod-section').open ? '1' : '0'); } catch (err) { /* private mode */ }
   });
-  $('pk-tier').addEventListener('change', updatePickerModSummary);
-}
-
-function updatePickerModSummary() {
-  const p = state.data.project;
-  const sel = $('pk-tier');
-  $('pk-mod-summary').textContent = `${p ? p.name : 'Mod'} options: ${sel.options[sel.selectedIndex]?.text || 'Always there'}`;
 }
 
 const objByKey = new Map();
@@ -679,22 +670,6 @@ function browseCells() {
     first: fav, star: { on: fav, toggle: (o) => toggleFavorite(o.id) },
     onPick: (o) => loadCell(o.id),
   });
-}
-
-function buildTierControls() {
-  const box = $('tiers');
-  box.innerHTML = '';
-  const names = NOOK_NAMES;
-  for (const [nook, max] of Object.entries(state.data.nooks).sort()) {
-    const label = document.createElement('label');
-    label.textContent = names[nook] || nook;
-    const sel = document.createElement('select');
-    for (let t = 0; t <= Math.max(max, 1); t++) sel.add(new Option(t === 0 ? '0 (bare)' : String(t), t));
-    sel.value = state.tiers[nook] = max;
-    sel.addEventListener('change', () => { state.tiers[nook] = +sel.value; refreshVisibility(); sel.blur(); });
-    label.appendChild(sel);
-    box.appendChild(label);
-  }
 }
 
 // --- Selection and editing -------------------------------------------------
@@ -839,7 +814,7 @@ function updatePanel() {
   updateTouchBar();
   updateQuickActs();
   updateButtons();
-  updateSelTier();
+  projectPanel.mod?.selected?.();
   const obj = state.selected;
   $('npc-row').style.display = 'none';
   if (!obj) {
@@ -863,8 +838,8 @@ function updatePanel() {
     fillFields(r);
     return;
   }
-  const tier = r.nook ? `${NOOK_NAMES[r.nook] || r.nook} ${r.only ? 'only at' : 'from'} tier ${r.tier}`
-    : Object.keys(NOOK_NAMES).length ? 'always there' : '';
+  let tag = '';
+  try { tag = projectPanel.mod?.describe?.(r.tag || null) || ''; } catch (err) { /* the module's own error */ }
   const p = state.data.project;
   const readOnly = p.standalone ? ` (read-only: the project is standalone, so ${p.plugin} uses only the game's files)`
     : p.inPlace ? ` (read-only: ${r.file} loads after ${p.plugin})`
@@ -886,7 +861,7 @@ function updatePanel() {
   const conflict = [others.length && `also changed by ${others.join(', ')}`,
                     r.winsOver?.length && (edited ? `⚠ ${r.winsOver.join(', ')} loads after ${p.plugin} and changes it too: its version wins in game`
                                                   : `changed by ${r.winsOver.join(', ')}, which loads after ${p.plugin}`)];
-  $('sel-info').textContent = [origin, tier, ...changes, ...conflict, noMesh].filter(Boolean).join(' · ');
+  $('sel-info').textContent = [origin, tag, ...changes, ...conflict, noMesh].filter(Boolean).join(' · ');
   updateDoor(r);
   $('sel-edit').style.display = r.editable ? '' : 'none';
   $('npc-row').style.display = r.kind === 'npc' ? '' : 'none';
@@ -1045,7 +1020,7 @@ function canonical(e) {
     deleted: [...deleted].filter((k) => !gone.has(k)).sort(),
     replaced: entries(e.replaced, (v) => v),
     added: (e.added || []).filter((a) => !gone.has('added|' + a.uid))
-      .map((a) => [a.uid, a.cell, a.id, a.pos.map(r2), a.rot.map(r5), a.scale ?? null, a.tier ?? null]),
+      .map((a) => [a.uid, a.cell, a.id, a.pos.map(r2), a.rot.map(r5), a.scale ?? null, a.tag ?? null]),
     attached: entries(e.attached, (v) => v).filter(([, v]) => !gone.has(v)),
     doors: entries(e.doors, (d) => [d.cell, d.pos.map(r2), d.rot.map(r5)]),
     groups: Object.values(e.groups || {}).map((ks) => ks.filter((k) => !gone.has(k)).sort())
@@ -1354,13 +1329,13 @@ async function duplicateSelected(rename = null) {
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const pos = [src.pos[0] + rt[0] * step, src.pos[1] + rt[1] * step, src.pos[2]];
     const as = rename && rename[src.src.toLowerCase()];
-    const tier = src.nook && !as && !isNewNpc(src.src) ? `${src.nook}${src.tier}${src.only ? 'o' : ''}` : null;
+    const tag = src.tag && !as && !isNewNpc(src.src) ? src.tag : null;
     const r = { key: 'added|' + uid, id: as || src.id, src: as || src.src, kind: src.kind, mesh: src.mesh, pos, rot: [...src.rot],
                 scale: src.scale, editable: true, origin: 'added', structure: false, isDoor: src.isDoor, door: src.door,
-                nook: src.nook || null, tier: src.tier ?? null, only: !!src.only };
+                tag };
     r.orig = { pos: [...r.pos], rot: [...r.rot] };
-    state.edits.added.push({ uid, cell: state.cell.name, id: as || (tier ? src.src : src.id), pos: [...pos], rot: [...r.rot],
-                             scale: src.scale === 1 ? 1 : src.scale, tier });
+    state.edits.added.push({ uid, cell: state.cell.name, id: as || (tag ? src.src : src.id), pos: [...pos], rot: [...r.rot],
+                             scale: src.scale === 1 ? 1 : src.scale, tag });
     const door = state.edits.doors[src.key]
       || (src.door && { cell: src.door.interior ? src.door.cell : '', pos: [...src.door.pos], rot: [0, 0, src.door.heading] });
     if (door) state.edits.doors[r.key] = JSON.parse(JSON.stringify(door));
@@ -1537,73 +1512,16 @@ function category(o) {
   }
   return TYPE_CATEGORY[o.type] || 'Other';
 }
-const picker = { onPick: null, items: [], source: [], sel: 0, tier: '' };
+const picker = { onPick: null, items: [], source: [], sel: 0 };
 
-function tierChoices() {
-  const sel = $('pk-tier');
-  fillTierChoices(sel);
-  sel.value = picker.tier;
-  if (sel.value !== picker.tier) sel.value = '';
-}
+const canTag = (o) => o.userData.ref.origin === 'added' && o.userData.ref.editable && !isNewNpc(o.userData.ref.src);
 
-function fillTierChoices(sel) {
-  sel.innerHTML = '';
-  sel.add(new Option('Always there', ''));
-  for (const [nook, max] of Object.entries(state.data.nooks).sort()) {
-    const name = NOOK_NAMES[nook] || nook;
-    sel.add(new Option(`${name}: only before any upgrade`, nook + '0o'));
-    for (let t = 1; t <= Math.max(max, 1); t++) {
-      sel.add(new Option(`${name}: from tier ${t}`, nook + t));
-      sel.add(new Option(`${name}: only at tier ${t}`, nook + t + 'o'));
-    }
-  }
-}
-
-const tierOf = (o) => { const r = o.userData.ref; return r.nook ? `${r.nook}${r.tier}${r.only ? 'o' : ''}` : ''; };
-const canRetier = (o) => o.userData.ref.origin === 'added' && o.userData.ref.editable && !isNewNpc(o.userData.ref.src);
-
-function updateSelTier() {
-  if ($('mod-section').style.display === 'none') return;
-  const sel = $('sel-tier'), objs = state.selection;
-  if (!sel.options.length) fillTierChoices(sel);
-  const ok = objs.length > 0 && objs.every(canRetier);
-  sel.disabled = !ok;
-  const tiers = new Set(objs.map(tierOf));
-  sel.value = tiers.size === 1 ? [...tiers][0] : '';
-  $('sel-tier-note').textContent = !objs.length ? 'Select an object to change its tier.'
-    : ok ? '' : 'Only objects added in the editor can change tier.';
-}
-
-$('sel-tier').addEventListener('change', () => {
-  const objs = state.selection.filter(canRetier);
-  const v = $('sel-tier').value || null;
-  const m = v && v.match(/^([a-z]+)(\d)(o?)$/);
-  const before = entriesOf(state.edits);
-  for (const o of objs) {
-    const r = o.userData.ref;
-    const a = state.edits.added.find((x) => 'added|' + x.uid === r.key);
-    if (!a) continue;
-    a.tier = v;
-    Object.assign(r, { nook: m ? m[1] : null, tier: m ? +m[2] : null, only: !!(m && m[3]) });
-  }
-  const diff = diffOf(before, entriesOf(state.edits));
-  if (diff.length) state.undo.push({ diff });
-  $('sel-tier').blur();
-  refreshVisibility();
-  updatePanel();
-  updateDirty();
-  const hidden = objs.some((o) => !o.visible);
-  status(`${$('sel-tier').selectedOptions[0]?.text || 'Always there'}.` + (hidden ? ' It belongs to a tier that is hidden right now.' : ''));
-});
-
-async function openPicker({ title, items, types, placeholder, showTier = false, onPick, first = null, star = null,
+async function openPicker({ title, items, types, placeholder, onPick, first = null, star = null,
                             attach = null, action = null, groups = [], remember = null }) {
   if (document.pointerLockElement) document.exitPointerLock();
   closeMenu();
   $('pk-title').textContent = title;
   $('pk-search').placeholder = placeholder || 'Search by name or id, e.g. chair, crate, torch…';
-  const modTiers = showTier && $('mod-section').style.display !== 'none';
-  $('pk-mod').style.display = modTiers ? '' : 'none';
   const type = $('pk-type');
   type.innerHTML = '';
   type.add(new Option('All', ''));
@@ -1620,7 +1538,6 @@ async function openPicker({ title, items, types, placeholder, showTier = false, 
   picker.lastKey = remember && 'ce-pk-last-' + remember;
   const last = picker.remember && storedNow(picker.remember);
   if (last && [...type.options].some((o) => o.value === last)) type.value = last;
-  if (modTiers) { tierChoices(); updatePickerModSummary(); } else $('pk-tier').innerHTML = '';
   picker.source = items;
   picker.onPick = onPick;
   picker.first = first;
@@ -1651,13 +1568,13 @@ function noteRecent(id) {
 
 const withRecent = (onPick) => (o) => { noteRecent(o.id); return onPick(o); };
 
-async function pickObject(title, showTier, onPick, attach = null, action = 'Add', group = 0) {
+async function pickObject(title, onPick, attach = null, action = 'Add', group = 0) {
   const fav = (o) => state.objectFavorites.includes(o.id);
   const fresh = npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 }));
   const items = [...fresh, ...await opening(getCatalog())];
   const files = [...new Set(items.map((o) => o.file).filter((f) => f && !OFFICIAL_FILES.includes(f.toLowerCase())))];
   const mods = files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]);
-  openPicker({ title, items, types: ['Favourites', 'Recent', ...OBJECT_CATEGORIES], showTier, onPick: withRecent(onPick),
+  openPicker({ title, items, types: ['Favourites', 'Recent', ...OBJECT_CATEGORIES], onPick: withRecent(onPick),
                attach, action, first: fav, star: { on: fav, toggle: (o) => toggleObjectFavorite(o.id) },
                groups: mods.length ? [{ label: 'Mods', options: mods }] : [], remember: 'objects' });
   $('pk-group-row').style.display = group ? '' : 'none';
@@ -1822,7 +1739,6 @@ function filterPicker(atLast = false) {
 
 function pick(o) {
   const fn = picker.onPick;
-  if ($('pk-tier').options.length) picker.tier = $('pk-tier').value;
   if (picker.lastKey) storeNow(picker.lastKey, o.id);
   closePicker();
   if (fn) fn(o);
@@ -2136,14 +2052,12 @@ function addAt(hit, kind = 'object', preset = null) {
     const quarter = Math.PI / 2;
     const yaw = ((Math.round((state.yaw + Math.PI) / quarter) * quarter) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const tier = (!isNewNpc(o.id) && $('pk-tier').options.length && picker.tier) || null;
-    const m = tier && tier.match(/^([a-z]+)(\d)(o?)$/);
+    const tag = (!isNewNpc(o.id) && state.newTag) || null;
     const npc = o.type === 'NPC';
     const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: npc ? 'npc' : 'mesh', mesh: npc ? null : o.mesh, pos: pos.toArray(),
-                rot: [0, 0, yaw], scale: 1, editable: true, origin: 'added', structure: false,
-                nook: m ? m[1] : null, tier: m ? +m[2] : null, only: !!(m && m[3]) };
+                rot: [0, 0, yaw], scale: 1, editable: true, origin: 'added', structure: false, tag };
     r.orig = { pos: [...r.pos], rot: [...r.rot] };
-    state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...r.pos], rot: [...r.rot], scale: 1, tier });
+    state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...r.pos], rot: [...r.rot], scale: 1, tag });
     state.cell.refs.push(r);
     const obj = await makeObject(r);
     world.add(obj);
@@ -2160,11 +2074,11 @@ function addAt(hit, kind = 'object', preset = null) {
     updateDirty();
     status(`Added ${o.name || o.id}` + (state.edits.attached[r.key] ? `, attached to ${baseRef.src}` : '')
            + (grouped ? `, in the group (${state.edits.groups[group].length} objects).` : '.')
-           + (obj.visible ? '' : ' It belongs to a tier that is hidden right now.'));
+           + (obj.visible ? '' : ' It\'s hidden in the current view.'));
   };
   if (preset) { put(preset.o, preset.opts).then(() => preset.then?.()); return; }
   if (kind === 'npc') { newNpc(put); return; }
-  pickObject('Add object', true, put, baseRef ? baseRef.src : null, 'Add',
+  pickObject('Add object', put, baseRef ? baseRef.src : null, 'Add',
              group ? state.edits.groups[group].length : 0);
 }
 
@@ -2219,7 +2133,7 @@ function addObject() {
   if (why) { status(why, true); return; }
   stopPlacing();
   const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
-  pickObject('Add object', true, (o) => startPlacing('object', { o, opts: pickedOptions() }),
+  pickObject('Add object', (o) => startPlacing('object', { o, opts: pickedOptions() }),
              true, 'Add', group ? state.edits.groups[group].length : 0);
 }
 
@@ -2239,7 +2153,7 @@ function swapSelected() {
   const objs = state.selection.filter((o) => o.visible && o.userData.ref.editable);
   if (!objs.length) return;
   const n = objs.length;
-  pickObject(n > 1 ? `Swap ${n} models (keeps positions)` : 'Swap model (keeps position)', false, async (o) => {
+  pickObject(n > 1 ? `Swap ${n} models (keeps positions)` : 'Swap model (keeps position)', async (o) => {
     const swaps = objs.map((obj) => {
       const r = obj.userData.ref;
       return { obj, src: r.src, mesh: r.mesh, kind: r.kind, had: r.key in state.edits.replaced,
@@ -2666,7 +2580,7 @@ function pauseFly() {
 function resumeFly() {
   if (!state.flyPaused) return;
   if ($('ctxmenu').classList.contains('open') || $('picker').classList.contains('open') || state.opening
-      || $('historybox').classList.contains('open') || state.placing || npcEditor.isOpen()
+      || $('historybox').classList.contains('open') || state.placing || npcEditor.isOpen() || projectPanelOpen()
       || document.querySelector('.dialog-bg')) return;
   state.flyPaused = false;
   const stop = () => setFly(false);
@@ -2802,6 +2716,7 @@ window.addEventListener('keydown', (e) => {
   if ((e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') || e.target.tagName === 'SELECT') return;
   if ($('picker').classList.contains('open') || $('historybox').classList.contains('open')) return;
   if (document.querySelector('.dialog-bg')) return;
+  if (projectPanelOpen()) return;
   if (npcEditor.isOpen()) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -2952,7 +2867,7 @@ function padPanel(hide) {
 
 function padBlocked() {
   return ['ctxmenu', 'picker', 'historybox', 'menu'].some((id) => $(id).classList.contains('open'))
-    || npcEditor.isOpen() || !!document.querySelector('.dialog-bg') || !!state.opening;
+    || npcEditor.isOpen() || projectPanelOpen() || !!document.querySelector('.dialog-bg') || !!state.opening;
 }
 
 function closeTop() {
@@ -2964,6 +2879,7 @@ function closeTop() {
   else if ($('historybox').classList.contains('open')) $('hb-close').click();
   else if ($('menu').classList.contains('open')) toggleMenu(false);
   else if (npcEditor.isOpen()) npcEditor.close();
+  else if (projectPanelOpen()) closeProjectPanel();
   else document.querySelector('.dialog.guide .primary')?.click();
 }
 
@@ -3163,7 +3079,7 @@ async function padAdd() {
   if (why) { status(why, true); return; }
   $('pk-search').value = '';
   const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
-  await pickObject('Add object', true, (o) => carryNew(o, pickedOptions()), true, 'Add',
+  await pickObject('Add object', (o) => carryNew(o, pickedOptions()), true, 'Add',
                    group ? state.edits.groups[group].length : 0);
   $('pk-search').blur();
 }
@@ -3604,8 +3520,132 @@ $('edit-npc').addEventListener('click', () => { const r = state.selected?.userDa
 $('tb-npc').addEventListener('click', () => { const r = state.selected?.userData.ref; if (r) openNpcs(r.src); });
 $('reset').addEventListener('click', resetSelected);
 
+// --- Project panel ---------------------------------------------------------------------
+
+const projectPanel = { mod: null, mounted: false, opening: null };
+const projectPanelOpen = () => $('projbox').classList.contains('open');
+
+function setupProjectPanel(p) {
+  $('proj-title').textContent = p.title;
+  $('proj-open').textContent = `${p.title}…`;
+  $('proj-open-row').style.display = '';
+  $('proj-open').style.display = '';
+  $('proj-open').addEventListener('click', openProjectPanel);
+  $('proj-close').addEventListener('click', closeProjectPanel);
+  $('projbox').addEventListener('click', (e) => { if (e.target === $('projbox')) closeProjectPanel(); });
+  $('projbox').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !document.querySelector('.dialog-bg')) {
+      const t = e.target;
+      e.preventDefault();
+      if (t.matches?.('input:not([type=checkbox]), textarea, select')) { t.blur(); $('proj-body').focus(); }
+      else closeProjectPanel();
+    }
+  });
+}
+
+// The project's module: default export mount(element, editor) for the panel, and optional side(element, editor)
+// for the side panel, shown(tag, view), describe(tag), reveal(tag, view) -> view, selected() and opened().
+async function loadProjectModule() {
+  if (!state.data.project?.panel) return;
+  try {
+    projectPanel.mod = await import(`/api/project/panel.js?v=${Date.now()}`);
+    if (projectPanel.mod.side) await projectPanel.mod.side($('proj-side'), projectApi);
+  } catch (err) {
+    console.error(err);
+    $('proj-side').textContent = `The project's tools didn't load: ${err.message}`;
+  }
+}
+
+async function openProjectPanel() {
+  if (document.pointerLockElement) pauseFly();
+  closeMenu();
+  $('projbox').classList.add('open');
+  $('proj-body').focus();
+  try {
+    if (projectPanel.mounted) { projectPanel.mod.opened?.(); return; }
+    if (projectPanel.opening) return;
+    if (!projectPanel.mod) throw new Error('the module is missing');
+    projectPanel.opening = projectPanel.mod.default($('proj-body'), projectApi);
+    await projectPanel.opening;
+    projectPanel.mounted = true;
+  } catch (err) {
+    console.error(err);
+    $('proj-body').textContent = `The panel didn't load: ${err.message}`;
+  } finally {
+    projectPanel.opening = null;
+  }
+}
+
+function closeProjectPanel() {
+  $('projbox').classList.remove('open');
+  resumeFlySoon();
+}
+
+const refInfo = (o) => {
+  const r = o.userData.ref;
+  return { key: r.key, id: r.id, src: r.src, cell: state.cell?.name, tag: r.tag || null, canTag: canTag(o) };
+};
+
+const projectApi = {
+  // the project's api(name, args), with the page's unsaved edits
+  async call(name, args = {}) {
+    const res = await fetch('/api/project/call', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                   body: JSON.stringify({ name, args, edits: state.edits }) });
+    const out = await res.json();
+    if (!res.ok || out.ok === false || out.error) throw new Error(out.message || out.error || res.statusText);
+    return out;
+  },
+  close: closeProjectPanel,
+  status: (text, warn = false) => status(text, warn),
+  save,
+  dirty: () => state.dirty,
+  cell: () => state.cell?.name || null,
+  view: () => state.view,
+  setView(view) { state.view = view || {}; refresh(); },
+  refresh,
+  selection: () => state.selection.map(refInfo),
+  // the tag objects added from now on get (not new NPCs)
+  setNewTag(tag) { state.newTag = tag || null; },
+  // {key: tag | null} for objects added in the editor, in any cell; one undo step; returns the keys changed
+  setTags(map) {
+    const before = entriesOf(state.edits);
+    const done = [];
+    for (const a of state.edits.added) {
+      const key = 'added|' + a.uid;
+      if (!(key in map)) continue;
+      a.tag = map[key] || null;
+      done.push(key);
+      if (a.cell !== state.cell?.name) cellCache.delete(a.cell);
+      const o = objByKey.get(key);
+      if (o) o.userData.ref.tag = a.tag;
+    }
+    const diff = diffOf(before, entriesOf(state.edits));
+    if (diff.length) state.undo.push({ diff });
+    refresh();
+    updateDirty();
+    return done;
+  },
+  // select an object (by key) in its cell, in a view that shows it, and look at it
+  async goTo(key, cell) {
+    closeProjectPanel();
+    if (cell && cell !== state.cell?.name) await loadCell(cell);
+    const o = objByKey.get(key);
+    if (!o) { status(`It isn't in ${state.cell?.name}.`, true); return false; }
+    const r = o.userData.ref;
+    if (!shownInView(r) && projectPanel.mod?.reveal) projectApi.setView(projectPanel.mod.reveal(r.tag, state.view));
+    select(o, false, true);
+    lookAtSelected();
+    return true;
+  },
+};
+
+function refresh() {
+  refreshVisibility();
+  updatePanel();
+}
+
 async function save() {
-  if (busy) { status(busy); return; }
+  if (busy) { status(busy); return false; }
   // with no changes it still writes the file again: what it's made from may have changed outside the editor
   const changed = state.dirty;
   setBusy('Saving…');
@@ -3624,9 +3664,11 @@ async function save() {
            + `${out.npcs ? `, ${out.npcs} NPC${out.npcs > 1 ? 's' : ''} changed or new` : ''}`
            + `${out.responses ? `, ${out.responses} response${out.responses > 1 ? 's' : ''} changed or new` : ''}.\n`
            + `${out.message}\nRestart OpenMW to see it in game.`, !!out.newMasters?.length);
+    return true;
   } catch (err) {
     setBusy(null);
     status('Save failed: ' + err.message, true);
+    return false;
   }
 }
 
@@ -3638,10 +3680,10 @@ async function save() {
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
   ['add-npc', 'n-add-pair'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
-  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list']];
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'] };
-const LAYOUT_ICONS = { drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
+const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
                        'lock-btn': 'lock', 'light-btn': 'bulb' };
 const layoutHome = new Map();
 const newLayout = () => document.body.classList.contains('layout-new');
@@ -4154,7 +4196,7 @@ function sendWhere(now) {
   if (!live.ready || !state.cell || state.loadingCell || now - live.whereAt < 250) return;
   const info = { label: DEVICE, cell: state.cell.name, pos: camera.position.toArray().map(Math.round),
                  yaw: Math.round(state.yaw * 1000) / 1000, pitch: Math.round(state.pitch * 1000) / 1000,
-                 sel: state.selection.map((o) => o.userData.ref.key), tiers: state.tiers };
+                 sel: state.selection.map((o) => o.userData.ref.key), view: state.view };
   const json = JSON.stringify(info);
   if (json === live.lastWhere) return;
   if (state.data.views) {
@@ -4170,13 +4212,13 @@ function sendWhere(now) {
 // A picture for an assistant (MCP), from the user's camera or another one; the user's view doesn't move.
 function viewPicture(ev) {
   if (!state.cell) throw new Error('The editor shows no cell.');
-  const keep = { pos: camera.position.clone(), yaw: state.yaw, pitch: state.pitch, tiers: { ...state.tiers } };
+  const keep = { pos: camera.position.clone(), yaw: state.yaw, pitch: state.pitch, view: state.view };
   const hide = [gizmoHelper, markers].filter((o) => o.visible);
   try {
     if (ev.pos) camera.position.set(...ev.pos);
     if (ev.yaw != null) state.yaw = ev.yaw;
     if (ev.pitch != null) state.pitch = ev.pitch;
-    if (ev.tiers) { Object.assign(state.tiers, ev.tiers); refreshVisibility(); }
+    if (ev.view) { state.view = { ...state.view, ...ev.view }; refreshVisibility(); }
     for (const o of hide) o.visible = false;
     camera.lookAt(camera.position.clone().add(viewDir()));
     camera.updateMatrixWorld();
@@ -4193,11 +4235,7 @@ function viewPicture(ev) {
     camera.position.copy(keep.pos);
     state.yaw = keep.yaw;
     state.pitch = keep.pitch;
-    if (ev.tiers) {
-      for (const k of Object.keys(state.tiers)) if (!(k in keep.tiers)) delete state.tiers[k];
-      Object.assign(state.tiers, keep.tiers);
-      refreshVisibility();
-    }
+    if (ev.view) { state.view = keep.view; refreshVisibility(); }
     aimCamera();
   }
 }
@@ -4376,7 +4414,7 @@ function openFailed(detail) {
   state.recentObjects = state.data.recentObjects || [];
   updateDirty();
   setupProject();
-  buildTierControls();
+  await loadProjectModule();
   const known = (c) => c && state.data.cells.some((x) => x.name === c);
   const last = [state.data.views?.last, stored('ce-last-cell')].find(known);
   await loadCell(last || state.data.startCell);

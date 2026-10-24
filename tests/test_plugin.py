@@ -60,9 +60,9 @@ class NewProject(unittest.TestCase):
         edits["moved"][scaled["key"]] = {"pos": scaled["pos"], "rot": scaled["rot"], "scale": 1.5}
         edits["deleted"].append(gone["key"])
         edits["added"] = [{"uid": "a1", "cell": CELL, "id": "barrel_01", "pos": [10.0, 20.0, 30.0],
-                           "rot": [0.0, 0.0, 0.5], "scale": None, "tier": None},
+                           "rot": [0.0, 0.0, 0.5], "scale": None, "tag": None},
                           {"uid": "a2", "cell": CELL, "id": "chest_small_01", "pos": [0.0, 0.0, 0.0],
-                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None}]
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tag": None}]
         self.save_edits(edits)
         self.p.build()
 
@@ -89,7 +89,7 @@ class NewProject(unittest.TestCase):
         self.assertNotIn(1, refs)
         self.assertEqual(esp.cstr(refs[2]["NAME"]), "chest_small_01")
         edits["added"].append({"uid": "a3", "cell": CELL, "id": "barrel_01", "pos": [5.0, 5.0, 5.0],
-                               "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None})
+                               "rot": [0.0, 0.0, 0.0], "scale": None, "tag": None})
         self.save_edits(edits)
         self.p.build()
         refs = dict(refs_of(self.p.plugin, CELL))
@@ -101,9 +101,9 @@ class NewProject(unittest.TestCase):
         edits = writer.empty_edits()
         edits["moved"][door["key"]] = {"pos": door["pos"], "rot": [0.0, 0.0, 1.0]}
         edits["added"] = [{"uid": "a1", "cell": CELL, "id": "barrel_01", "pos": [1.0, 2.0, 3.0],
-                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None},
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tag": None},
                           {"uid": "a2", "cell": CELL, "id": "fargoth", "pos": [4.0, 5.0, 6.0],
-                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None}]
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tag": None}]
         self.save_edits(edits)
         self.p.build()
         subs = next(s for t, _, s in esp.esm_records(self.p.plugin) if t == "CELL")
@@ -150,7 +150,7 @@ class NewProject(unittest.TestCase):
         edits["moved"][moved["key"]] = {"pos": south, "rot": moved["rot"]}
         west = [-3 * 8192 + 100.0, -9 * 8192 + 100.0, 0.0]
         edits["added"] = [{"uid": "x1", "cell": src, "id": "barrel_01", "pos": west, "rot": [0.0, 0.0, 0.0],
-                           "scale": None, "tier": None}]
+                           "scale": None, "tag": None}]
         self.save_edits(edits)
         self.p.build()
         refs = refs_of(self.p.plugin, src)
@@ -261,7 +261,7 @@ class LoadOrder(unittest.TestCase):
         self.assertIn("|vanilla|Tribunal.esm:", tr["key"])
         edits["moved"][tr["key"]] = {"pos": [5.0, 5.0, 5.0], "rot": [0.0, 0.0, 0.0]}
         edits["added"] = [{"uid": "b1", "cell": CELL, "id": self.bloodmoon_object["id"], "pos": [0.0, 0.0, 0.0],
-                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None}]
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tag": None}]
         self.assertEqual(self.build(edits), ["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"])
         refs = dict(refs_of(self.p.plugin, self.tribunal_cell))
         self.assertIn((2 << 24) | tr["vanilla"][0], refs)
@@ -344,7 +344,7 @@ class InPlace(unittest.TestCase):
         edits["moved"][mw_moved] = {"pos": [7.0, 8.0, 9.0], "rot": [0.0, 0.0, 0.0]}
         edits["deleted"] += [mw_gone, self.key("X Test Room", 2)]
         edits["added"] = [{"uid": "n1", "cell": "X Test Room", "id": "chest_small_01", "pos": [5.0, 5.0, 5.0],
-                           "rot": [0.0, 0.0, 0.0], "scale": None, "tier": None}]
+                           "rot": [0.0, 0.0, 0.0], "scale": None, "tag": None}]
         data = self.build(edits)
         self.assertIn(self.static, data)
         records = [t for t, _, _ in esp.esm_records(self.plugin)]

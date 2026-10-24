@@ -31,7 +31,7 @@ def setup(p):
     """Switch to a project and reset the caches that depend on it."""
     global project, history, _models, _catalog, _land
     project = p
-    history = History(p.file("history"))
+    history = History(p.file("history"), p.migrate)
     _models = _catalog = _land = None
     _disk_meshes.clear()
     geometry.clear()
@@ -528,7 +528,6 @@ def _entry(r, clones, index):
         kind = "mesh"
     elif m and m[0] == "LIGH":
         kind = "light"
-    t = project.tier(r["id"])
     structure = bool(m and m[0] == "STAT" and (src.startswith(STRUCTURE_PREFIXES) or src in project.structure_ids()))
     origin = "vanilla" if r.get("vanilla") else "added" if r.get("added") else "mod"
     pos, rot = [float(v) for v in r["pos"]], [float(v) for v in r["rot"]]
@@ -541,7 +540,7 @@ def _entry(r, clones, index):
             "file": r.get("origin"), "changedBy": r.get("changed_by") or [],
             "isDoor": bool(m and m[0] == "DOOR"), "door": _door(r),
             "winsOver": [f for f in r.get("changed_by") or [] if f.lower() in project.loads_after],
-            "nook": t[0] if t else None, "tier": t[1] if t else None, "only": bool(t and t[2]), "orig": orig,
+            "tag": project.tag(r["id"]) or r.get("tag"), "orig": orig,
             "light": light_info(src, index) if m and m[0] == "LIGH" else None}
 
 
@@ -667,10 +666,11 @@ def favorites():
 
 def info():
     """What the page shows about the project."""
-    return {"name": project.name, "plugin": os.path.basename(project.plugin), "nooks": project.nooks,
+    return {"name": project.name, "plugin": os.path.basename(project.plugin),
             "masters": [os.path.basename(m) for m in project.masters], "fixedMasters": project.fixed_masters,
             "inPlace": project.in_place, "loadOrder": [f.name for f in project.load.files], "path": project.path,
-            "standalone": bool(project.config.get("standalone")), "canEditNpcs": project.can_edit_npcs}
+            "standalone": bool(project.config.get("standalone")), "canEditNpcs": project.can_edit_npcs,
+            "panel": {"title": project.panel["title"]} if project.panel else None}
 
 
 # --- NPCs -----------------------------------------------------------------------------
@@ -700,13 +700,7 @@ def npc_id(oid):
 
 def scene():
     """Everything the editor needs except the cells' contents."""
-    cells, vanilla, clones, keys = _gather()
-    nooks = {}
-    for refs in cells.values():
-        for r in refs:
-            t = project.tier(r["id"])
-            if t:
-                nooks[t[0]] = max(nooks.get(t[0], 0), t[1])
+    keys = _gather()[3]
     edits = project.load_edits()
     orphans = [k for k in list(edits["moved"]) + edits["deleted"] + list(edits["replaced"]) if k not in keys]
     fav = favorites()
@@ -714,9 +708,21 @@ def scene():
     start = project.config["start_cell"]
     start = start if start in names else next(iter(project.own_cells), None) or sorted(names)[0]
     return {"project": info(), "cells": all_cells(), "own": list(project.own_cells), "favorites": fav["cells"],
-            "objectFavorites": fav["objects"], "recentObjects": fav["recent"], "startCell": start, "nooks": nooks,
+            "objectFavorites": fav["objects"], "recentObjects": fav["recent"], "startCell": start,
             "edits": edits, "live": LIVE.state(), "orphans": orphans, "notice": _take_notice(), "views": views(),
             "hasThumb": os.path.exists(_thumb_file(project.path, ".jpg")), "lighting": lighting()}
+
+
+def project_call(body):
+    """A call from the project's panel: (JSON reply, HTTP status)."""
+    edits = body.get("edits")
+    try:
+        out = project.api(body["name"], body.get("args") or {}, lambda: _gather(edits=edits)[0])
+    except KeyError as e:
+        return json.dumps({"ok": False, "message": "unknown call %s" % e}).encode(), 404
+    except ValueError as e:
+        return json.dumps({"ok": False, "message": str(e)}).encode(), 400
+    return json.dumps(out).encode(), 200
 
 
 def _take_notice():
@@ -925,7 +931,7 @@ def clean_edits(edits):
             "replaced": {k: v for k, v in sorted(edits.get("replaced", {}).items()) if k not in gone},
             "added": [{"uid": a["uid"], "cell": a["cell"], "id": a["id"],
                        "pos": [round(v, 2) for v in a["pos"]], "rot": [round(v, 5) for v in a["rot"]],
-                       "scale": a.get("scale"), "tier": a.get("tier")}
+                       "scale": a.get("scale"), "tag": a.get("tag")}
                       for a in edits.get("added", []) if "added|" + a["uid"] not in gone],
             "attached": {k: v for k, v in sorted(edits.get("attached", {}).items())
                          if k not in gone and v not in gone},
@@ -939,13 +945,13 @@ def clean_edits(edits):
 
 
 def _base_ids(edits):
-    """Make added objects in an upgrade tier name the object they copy; new NPCs have no tier to copy them for."""
+    """Make tagged added objects name the object they copy; new NPCs have no tag."""
     clones = {k.lower(): v for k, v in project.clones().items()}
     new = {k.lower() for k, v in (edits.get("npcs") or {}).items() if v and v.get("new")}
     for a in edits.get("added") or []:
-        if a.get("tier") and a["id"].lower() in new:
-            a["tier"] = None
-        elif a.get("tier") and a["id"].lower() in clones:
+        if a.get("tag") and a["id"].lower() in new:
+            a["tag"] = None
+        elif a.get("tag") and a["id"].lower() in clones:
             a["id"] = clones[a["id"].lower()]
     return edits
 
@@ -1268,6 +1274,11 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.reply(mesh(q["path"]))
                 except KeyError:
                     return self.reply(b"[]", code=404)
+            if u.path == "/api/project/panel.js":
+                if not project.panel:
+                    return self.reply(b"{}", code=404)
+                with open(project.panel["script"], "rb") as f:
+                    return self.reply(f.read(), "text/javascript; charset=utf-8")
             if u.path == "/api/tex":
                 data = texture(q["name"])
                 return self.reply(data, "application/octet-stream") if data else self.reply(b"{}", code=404)
@@ -1325,6 +1336,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(cell_data(body["name"], body.get("edits"))).encode())
             if u.path == "/api/npc/dialogue":
                 return self.reply(json.dumps(npc_dialogue(body["id"], body.get("edits") or {})).encode())
+            if u.path == "/api/project/call":
+                out, code = project_call(body)
+                return self.reply(out, code=code)
             if u.path == "/api/live/ops":
                 if not LIVE.apply(body.get("page"), body.get("path"), body.get("ops") or []):
                     return self.reply(b'{"ok": false, "message": "another project is open"}', code=409)

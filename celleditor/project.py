@@ -39,8 +39,9 @@ OFFICIAL_NAMES = set(OFFICIAL)
 
 class Project:
     own_cells = ()
-    nooks = {}
     fixed_masters = False
+    # {"title": ..., "script": an ES module whose default export is mount(element, editor)}, or None
+    panel = None
 
     def __init__(self, path, config, game):
         self.path = os.path.abspath(path)
@@ -83,7 +84,7 @@ class Project:
     def load_edits(self):
         if self.edits_override is not None:
             return json.loads(json.dumps(self.edits_override))
-        return writer.load_edits(self.file("edits"))
+        return self.migrate(writer.load_edits(self.file("edits")))
 
     def master_refs(self, cell):
         """A cell's references in the load order, as refs the edits can change."""
@@ -333,9 +334,21 @@ class Project:
         """Write the plugin to path: its cells with the layout edits, and its own records."""
         raise NotImplementedError
 
-    def tier(self, obj_id):
-        """(nook, tier, only at that tier) of an upgrade-tier object, or None."""
+    def api(self, name, args, cells):
+        """A call from the project's panel; KeyError for an unknown name, ValueError for a message."""
+        raise KeyError(name)
+
+    def tag(self, obj_id):
+        """The project's tag for an object, or None."""
         return None
+
+    def shown(self, tag, view):
+        """Whether a tagged object shows in a page's view (the panel's state); ValueError for an unknown tag."""
+        return True
+
+    def migrate(self, edits):
+        """Saved edits in an older form, brought up to date."""
+        return edits
 
     def start(self, cell):
         """((x, y, z), heading) where the camera starts in a cell, or None."""

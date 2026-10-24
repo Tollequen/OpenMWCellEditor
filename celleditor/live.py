@@ -172,7 +172,7 @@ class Live:
         with self.lock:
             if page not in self.pages:
                 return
-            info = {k: info.get(k) for k in ("label", "cell", "pos", "yaw", "pitch", "sel", "tiers")}
+            info = {k: info.get(k) for k in ("label", "cell", "pos", "yaw", "pitch", "sel", "view")}
             self.presence[page] = info
             self.seen[page] = time.time()
             self._send(dict(info, type="presence", page=page), skip=page)

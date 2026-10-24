@@ -126,6 +126,8 @@ def apply_edits(cells, vanilla, edits, added_id=None, replaced_id=None):
             r = ref(added_id(a) if added_id else a["id"], *a["pos"], a["rot"][2],
                     rot_x=a["rot"][0], rot_y=a["rot"][1], scale=a.get("scale"))
             r["added"] = a["uid"]
+            if a.get("tag"):
+                r["tag"] = a["tag"]
             cells[a["cell"]].append(r)
     lists = [(c, refs, False) for c, refs in cells.items()] + [(c, refs, True) for c, refs in (vanilla or {}).items()]
     for cell, refs, from_master in lists:
