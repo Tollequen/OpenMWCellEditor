@@ -543,7 +543,9 @@ def _entry(r, clones, index):
             "isDoor": bool(m and m[0] == "DOOR"), "door": _door(r),
             "winsOver": [f for f in r.get("changed_by") or [] if f.lower() in project.loads_after],
             "tag": project.tag(r["id"]) or r.get("tag"), "orig": orig,
-            "light": light_info(src, index) if m and m[0] == "LIGH" else None}
+            "light": light_info(src, index) if m and m[0] == "LIGH" else None,
+            "props": writer.props_of(r), "lockable": bool(m and m[0] in ("DOOR", "CONT")),
+            "ownable": not (m and m[0] in ("NPC_", "CREA", "STAT"))}
 
 
 # --- Lighting -------------------------------------------------------------------------
@@ -996,7 +998,9 @@ def clean_edits(edits):
             "groups": {g: sorted(keys) for g, keys in sorted(
                 (g, [k for k in ks if k not in gone]) for g, ks in edits.get("groups", {}).items()) if len(keys) > 1},
             "npcs": {k: v for k, v in sorted((edits.get("npcs") or {}).items()) if v},
-            "dialogue": {k: v for k, v in sorted((edits.get("dialogue") or {}).items()) if v}}
+            "dialogue": {k: v for k, v in sorted((edits.get("dialogue") or {}).items()) if v},
+            "props": {k: {f: p[f] for f in sorted(p)} for k, p in sorted((edits.get("props") or {}).items())
+                      if p and k not in gone}}
 
 
 def _base_ids(edits):
@@ -1072,6 +1076,9 @@ def revert(name, key=None):
     cur.setdefault("doors", {}).pop(key, None)
     if "door" in st:
         cur["doors"][key] = st["door"]
+    cur.setdefault("props", {}).pop(key, None)
+    if "props" in st:
+        cur["props"][key] = st["props"]
     groups = cur.setdefault("groups", {})
     for g in list(groups):
         groups[g] = [k for k in groups[g] if k != key]

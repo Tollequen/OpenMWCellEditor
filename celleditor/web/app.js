@@ -7,6 +7,7 @@ import { keepAlive, showStopped } from './alive.js';
 import { phoneButton } from './phone.js';
 import { icon, iconMask, fillIcons } from './icons.js';
 import { setupNpcEditor } from './npc.js';
+import { setSuggestions, suggest } from './suggest.js';
 import { setupGamepad } from './gamepad.js';
 
 const $ = (id) => document.getElementById(id);
@@ -544,7 +545,229 @@ function refreshVisibility() {
     if (r) obj.visible = shownInView(r) && !deleted.has(r.key);
   }
   if (state.selection.some((o) => !o.visible)) setSelection(state.selection);
+  updateOwnedBoxes();
 }
+
+// --- Owner, lock and trap ------------------------------------------------------
+// props: {owner, global, faction, rank, lock, key, trap}; an edit sets fields (null clears one), as the
+// server's writer.apply_props: the rank goes with the faction, and a key alone locks it at level 0.
+
+const ownedBoxes = new THREE.Group();
+scene.add(ownedBoxes);
+const owned = { on: false, lists: null };
+
+function withProps(cur, patch) {
+  const p = { ...(cur || {}) };
+  for (const [k, v] of Object.entries(patch)) { if (v == null || v === '') delete p[k]; else p[k] = v; }
+  if (!('faction' in p)) delete p.rank; else if (!('rank' in p)) p.rank = 0;
+  if (p.lock === 0 && !('key' in p)) delete p.lock;
+  if ('key' in p && !('lock' in p)) p.lock = 0;
+  return p;
+}
+
+function ownershipLists() {
+  owned.lists = owned.lists || Promise.all([fetch('/api/npc/lists').then((r) => r.json()),
+                                            fetch('/api/npcs').then((r) => r.json())])
+    .then(([l, n]) => {
+      setSuggestions('own-npcs', n.npcs.map((o) => [o.id, o.name || '']));
+      setSuggestions('own-keys', l.items.filter((o) => o.key).map((o) => [o.id, o.name || '']));
+      setSuggestions('own-spells', l.spells.map((o) => [o.id, `${o.name || o.id} · ${o.type}`]));
+      setSuggestions('own-globals', (l.globals || []).map((g) => [g, '']));
+      return { factions: l.factions, npcs: n.npcs, items: l.items, spells: l.spells };
+    })
+    .catch((err) => { owned.lists = null; throw err; });
+  return owned.lists;
+}
+
+const isOwned = (p) => !!(p && (p.owner || p.faction));
+
+function propsText(p, lockable, names = {}) {
+  const name = (id, list) => list?.find((x) => x.id.toLowerCase() === (id || '').toLowerCase())?.name || id;
+  const parts = [];
+  if (p.owner) parts.push(`Owned by ${name(p.owner, names.npcs)}`);
+  if (p.faction) {
+    const f = names.factions?.find((x) => x.id.toLowerCase() === p.faction.toLowerCase());
+    const rank = f?.ranks[p.rank] ? `, rank ${f.ranks[p.rank]} and up` : p.rank ? `, rank ${p.rank + 1} and up` : '';
+    parts.push(`Owned by ${f?.name || p.faction}${rank}`);
+  }
+  if (!parts.length) parts.push('Not owned');
+  if (p.global) parts.push(`free to take when ${p.global} is set`);
+  if (lockable) {
+    parts.push(p.lock == null ? 'not locked' : p.lock > 0 ? `locked (level ${p.lock})` : 'locked (opens only with its key)');
+    if (p.key) parts.push(`key: ${name(p.key, names.items)}`);
+  }
+  if (p.trap) parts.push(`trapped: ${name(p.trap, names.spells)}`);
+  return parts.join(' · ');
+}
+
+function updateOwn() {
+  const refs = state.selection.map((o) => o.userData.ref);
+  const show = refs.length > 0 && refs.every((r) => r.ownable);
+  $('own-row').style.display = show ? '' : 'none';
+  if (!show) return;
+  const lockable = refs.every((r) => r.lockable);
+  const texts = new Set(refs.map((r) => propsText(r.props || {}, lockable)));
+  $('own-info').textContent = texts.size === 1 ? [...texts][0] : 'Owners and locks differ';
+  $('own-edit').disabled = !refs.every((r) => r.editable);
+  if (!owned.lists) { ownershipLists().then(updateOwn).catch(() => {}); return; }
+  if (texts.size === 1) {
+    owned.lists.then((names) => {
+      if (state.selection.map((o) => o.userData.ref).every((r, i) => r === refs[i])) {
+        $('own-info').textContent = propsText(refs[0].props || {}, lockable, names);
+      }
+    }).catch(() => {});
+  }
+}
+
+const ownedFill = new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: true, opacity: 0.18, depthWrite: false });
+const ownedCube = new THREE.BoxGeometry(1, 1, 1);
+
+function updateOwnedBoxes() {
+  for (const b of ownedBoxes.children) { if (b.isBox3Helper) { b.geometry.dispose(); b.material.dispose(); } }
+  ownedBoxes.clear();
+  if (!owned.on) return;
+  for (const obj of world.children) {
+    const r = obj.userData.ref;
+    if (!r || !obj.visible || !isOwned(r.props)) continue;
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) continue;
+    ownedBoxes.add(new THREE.Box3Helper(box, 0xff4040));
+    const fill = new THREE.Mesh(ownedCube, ownedFill);
+    box.getCenter(fill.position);
+    box.getSize(fill.scale).addScalar(0.5);
+    ownedBoxes.add(fill);
+  }
+  requestRender();
+}
+
+$('owned-btn').addEventListener('click', () => {
+  owned.on = !owned.on;
+  $('owned-btn').classList.toggle('on', owned.on);
+  $('owned-btn').setAttribute('aria-pressed', String(owned.on));
+  updateOwnedBoxes();
+  const n = ownedBoxes.children.filter((b) => b.isBox3Helper).length;
+  status(owned.on ? (n ? `${n} owned object${n > 1 ? 's' : ''} in red.` : 'Nothing here is owned.') : '');
+});
+
+// sets the same fields on every object in the list, as one undo step
+function setProps(refs, patch) {
+  const before = entriesOf(state.edits);
+  for (const r of refs) {
+    state.edits.props[r.key] = { ...(state.edits.props[r.key] || {}), ...patch };
+    r.props = withProps(r.props, patch);
+  }
+  const diff = diffOf(before, entriesOf(state.edits));
+  if (diff.length) state.undo.push({ diff });
+  updatePanel();
+  updateOwnedBoxes();
+  updateDirty();
+}
+
+async function editOwnership() {
+  const refs = state.selection.map((o) => o.userData.ref).filter((r) => r.ownable && r.editable);
+  if (!refs.length) return;
+  let names;
+  try { names = await ownershipLists(); } catch (err) { status('The lists of NPCs and factions didn\'t load.', true); return; }
+  const lockable = refs.every((r) => r.lockable);
+  const val = (k) => { const v = new Set(refs.map((r) => r.props?.[k] ?? '')); return v.size === 1 ? [...v][0] : null; };
+  const kind = val('owner') === null || val('faction') === null ? null : val('owner') ? 'npc' : val('faction') ? 'faction' : '';
+  const bg = document.createElement('div');
+  bg.className = 'dialog-bg';
+  bg.innerHTML = `<div class="dialog own-dialog">
+    <h3>Owner and lock</h3>
+    <p class="dim">${refs.length > 1 ? `${refs.length} objects. Only what you change here is set on all of them.` : refs[0].src}</p>
+    <label class="opt">Owned by <select id="ow-kind"><option value="">Nobody</option><option value="npc">An NPC</option>
+      <option value="faction">A faction</option>${kind === null ? '<option value="mixed">(differs)</option>' : ''}</select></label>
+    <label class="opt ow-npc">NPC <input type="text" id="ow-npc" placeholder="NPC id, e.g. fargoth" autocomplete="off"></label>
+    <label class="opt ow-fac">Faction <select id="ow-faction"></select></label>
+    <label class="opt ow-fac">Rank <select id="ow-rank"></select></label>
+    <label class="opt">Free to take when <input type="text" id="ow-global" placeholder="a global variable (optional)" autocomplete="off"></label>
+    <div class="ow-lock">
+      <label class="check"><input type="checkbox" id="ow-locked"> Locked</label>
+      <label class="opt">Lock level <input type="number" id="ow-level" min="0" max="100"></label>
+      <label class="opt">Key <input type="text" id="ow-key" placeholder="key id (optional)" autocomplete="off"></label>
+      <label class="opt">Trap <input type="text" id="ow-trap" placeholder="spell id (optional)" autocomplete="off"></label>
+    </div>
+    <div class="npc-hint" id="ow-note"></div>
+    <div class="bar"><button id="ow-cancel">Cancel</button><button class="primary" id="ow-apply">Apply</button></div></div>`;
+  document.body.appendChild(bg);
+  const q = (id) => bg.querySelector('#' + id);
+  const touched = new Set();
+  const touch = (group) => () => { touched.add(group); show(); };
+  q('ow-faction').add(new Option('—', ''));
+  for (const f of [...names.factions].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))) q('ow-faction').add(new Option(f.name || f.id, f.id));
+  const fillRanks = (rank) => {
+    const f = names.factions.find((x) => x.id === q('ow-faction').value);
+    q('ow-rank').innerHTML = '';
+    (f ? f.ranks : []).forEach((r, i) => q('ow-rank').add(new Option(`${i + 1}. ${r} and up`, String(i))));
+    q('ow-rank').value = String(rank ?? 0);
+  };
+  q('ow-kind').value = kind === null ? 'mixed' : kind;
+  q('ow-npc').value = val('owner') ?? '';
+  const fac = names.factions.find((x) => x.id.toLowerCase() === (val('faction') || '').toLowerCase());
+  q('ow-faction').value = fac ? fac.id : '';
+  fillRanks(val('rank'));
+  q('ow-global').value = val('global') ?? '';
+  const lock = val('lock');
+  q('ow-locked').checked = lock !== '' && lock !== null;
+  q('ow-locked').indeterminate = lock === null;
+  q('ow-level').value = lock === null || lock === '' ? '' : lock;
+  q('ow-key').value = val('key') ?? '';
+  q('ow-trap').value = val('trap') ?? '';
+  for (const [id, list] of [['ow-npc', 'own-npcs'], ['ow-global', 'own-globals'], ['ow-key', 'own-keys'], ['ow-trap', 'own-spells']]) {
+    suggest(q(id), list);
+    if (val(id === 'ow-npc' ? 'owner' : id.slice(3)) === null) q(id).placeholder = '(differs)';
+  }
+  const show = () => {
+    const k = q('ow-kind').value;
+    bg.querySelectorAll('.ow-npc').forEach((e) => { e.style.display = k === 'npc' ? '' : 'none'; });
+    bg.querySelectorAll('.ow-fac').forEach((e) => { e.style.display = k === 'faction' ? '' : 'none'; });
+    q('ow-level').disabled = !q('ow-locked').checked;
+    bg.querySelector('.ow-lock').style.display = lockable ? '' : 'none';
+    q('ow-note').textContent = lockable ? '' : 'Only doors and containers have locks and traps.';
+  };
+  q('ow-kind').addEventListener('change', touch('owner'));
+  q('ow-npc').addEventListener('input', touch('owner'));
+  q('ow-faction').addEventListener('change', () => { fillRanks(0); touched.add('owner'); show(); });
+  q('ow-rank').addEventListener('change', touch('owner'));
+  q('ow-global').addEventListener('input', touch('global'));
+  q('ow-locked').addEventListener('change', () => {
+    touched.add('lock');
+    if (q('ow-locked').checked && q('ow-level').value === '') q('ow-level').value = 25;
+    show();
+  });
+  q('ow-level').addEventListener('input', touch('lock'));
+  q('ow-key').addEventListener('input', touch('lock'));
+  q('ow-trap').addEventListener('input', touch('trap'));
+  show();
+  const close = () => bg.remove();
+  bg.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+  q('ow-cancel').addEventListener('click', close);
+  q('ow-apply').addEventListener('click', () => {
+    const patch = {};
+    if (touched.has('owner') && q('ow-kind').value !== 'mixed') {
+      const k = q('ow-kind').value;
+      patch.owner = k === 'npc' ? q('ow-npc').value.trim() || null : null;
+      patch.faction = k === 'faction' ? q('ow-faction').value || null : null;
+      patch.rank = k === 'faction' && q('ow-faction').value ? Number(q('ow-rank').value) || 0 : null;
+    }
+    if (touched.has('global')) patch.global = q('ow-global').value.trim() || null;
+    if (touched.has('lock') && lockable) {
+      const on = q('ow-locked').checked;
+      patch.lock = on ? Math.max(0, Math.min(100, Math.round(Number(q('ow-level').value) || 0))) : null;
+      patch.key = on ? q('ow-key').value.trim() || null : null;
+    }
+    if (touched.has('trap') && lockable) patch.trap = q('ow-trap').value.trim() || null;
+    close();
+    if (!Object.keys(patch).length) return;
+    setProps(refs, patch);
+    status(`${refs.length > 1 ? `${refs.length} objects` : refs[0].src}: ${propsText(withProps(refs[0].props, {}), lockable, names)}.`);
+  });
+  (kind === 'npc' ? q('ow-npc') : q('ow-kind')).focus();
+}
+
+$('own-edit').addEventListener('click', editOwnership);
 
 async function fillObject(obj) {
   const r = obj.userData.ref;
@@ -860,6 +1083,7 @@ function updatePanel() {
   updateQuickActs();
   updateButtons();
   projectPanel.mod?.selected?.();
+  updateOwn();
   const obj = state.selected;
   $('npc-row').style.display = 'none';
   if (!obj) {
@@ -1072,6 +1296,7 @@ function canonical(e) {
       .filter((ks) => ks.length > 1).map((ks) => ks.join('\n')).sort(),
     npcs: entries(e.npcs, (v) => JSON.stringify(sortedKeys(v))),
     dialogue: entries(e.dialogue, (v) => JSON.stringify(sortedKeys(v))),
+    props: entries(e.props, (v) => JSON.stringify(sortedKeys(v))),
   });
 }
 
@@ -1104,7 +1329,8 @@ function updateDirty() {
 }
 
 function withSections(e) {
-  return Object.assign({ moved: {}, deleted: [], replaced: {}, added: [], attached: {}, doors: {}, groups: {}, npcs: {}, dialogue: {} }, e);
+  return Object.assign({ moved: {}, deleted: [], replaced: {}, added: [], attached: {}, doors: {}, groups: {}, npcs: {}, dialogue: {},
+                         props: {} }, e);
 }
 
 function offerDraft() {
@@ -2634,6 +2860,7 @@ function describe(st) {
   if (st.attached) parts.push('attached');
   if (st.door) parts.push(`leads to ${st.door.cell || 'the exterior'}`);
   if (st.group) parts.push('grouped');
+  if (st.props) parts.push(`owner or lock set (${Object.keys(st.props).join(', ')})`);
   if (st.deleted) parts.push('deleted');
   return parts.join(', ');
 }
@@ -3840,7 +4067,7 @@ const listText = (xs) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).
 // What changed between two saves, e.g. "2 objects moved, 1 added, 1 NPC changed"
 function changesText(before, after) {
   const sets = { moved: new Set(), added: new Set(), deleted: new Set(), swapped: new Set(), restored: new Set(),
-                 doors: new Set(), npcs: new Set(), responses: new Set(), other: new Set() };
+                 doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), other: new Set() };
   for (const { id } of diffOf(before, after)) {
     const [sec, k] = splitId(id);
     if (sec === 'added') sets[!before.has(id) ? 'added' : !after.has(id) ? 'deleted' : 'moved'].add(id);
@@ -3850,6 +4077,7 @@ function changesText(before, after) {
     else if (sec === 'doors') sets.doors.add(k);
     else if (sec === 'npcs') sets.npcs.add(k);
     else if (sec === 'dialogue') sets.responses.add(k);
+    else if (sec === 'props') sets.props.add(k);
     else sets.other.add(k);
   }
   for (const k of sets.deleted) sets.moved.delete(k);
@@ -3858,6 +4086,7 @@ function changesText(before, after) {
                  ['restored', 'brought back']].filter(([k]) => sets[k].size)
     .map(([k, verb], i) => (i ? `${sets[k].size} ${verb}` : `${n(sets[k], 'object', 'objects')} ${verb}`));
   if (sets.doors.size) parts.push(`${n(sets.doors, 'door destination', 'door destinations')} changed`);
+  if (sets.props.size) parts.push(`owner or lock of ${n(sets.props, 'object', 'objects')} changed`);
   if (sets.npcs.size) parts.push(`${n(sets.npcs, 'NPC', 'NPCs')} changed`);
   if (sets.responses.size) parts.push(`${n(sets.responses, 'response', 'responses')} changed`);
   if (!parts.length && sets.other.size) parts.push('attached or grouped objects changed');
@@ -4156,7 +4385,7 @@ function sendPicture(saved) {
 const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 const live = { shared: new Map(), sent: new Map(), timer: null, sending: null, again: false, ready: false,
                others: new Map(), lastWhere: '', whereAt: 0, refreshing: false, refreshAgain: false };
-const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue'];
+const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props'];
 const UA = navigator.userAgent;
 const DEVICE = /iPhone/.test(UA) ? 'iPhone' : /iPad/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1) ? 'iPad'
   : /Android/.test(UA) ? (/Mobile/.test(UA) ? 'Android phone' : 'Android tablet') : 'Computer';
@@ -4327,7 +4556,7 @@ function showChanges(ids, remote = true) {
       r.rot = [...(m ? m.rot : r.orig.rot)];
       r.scale = m?.scale ?? r.orig.scale ?? 1;
       applyTransform(obj);
-    } else if (sec === 'added' || sec === 'replaced') {
+    } else if (sec === 'added' || sec === 'replaced' || sec === 'props') {
       refresh = true;
     }
   }

@@ -130,6 +130,8 @@ class Cell:
             out["tag"] = r["tag"]
             if not self.shown(r):
                 out["hidden_in_this_view"] = True
+        if r.get("props"):
+            out["owner_lock_trap"] = r["props"]
         if r["origin"] != "mod":
             out["origin"] = r["origin"]
         if r.get("structure"):
@@ -313,6 +315,29 @@ def _cell_of_key(key, edits):
     return key.split("|", 1)[0]
 
 
+def t_set_props(args):
+    edits = LIVE.edits()
+    patch = {k: args[k] for k in ("owner", "global", "faction", "rank", "lock", "key", "trap") if k in args}
+    if not patch:
+        raise ToolError("Give at least one of owner, global, faction, rank, lock, key, trap.")
+    cells, ops = {}, []
+    for i, key in enumerate(args.get("keys") or []):
+        name = _cell_of_key(key, edits)
+        cell = cells.get(name) or cells.setdefault(name, Cell(name))
+        r = cell.by_key.get(key)
+        if not r:
+            raise ToolError("keys[%d]: no object %r in %s" % (i, key, name))
+        if not r.get("editable", True) or not r.get("ownable"):
+            raise ToolError("keys[%d]: %s can't be owned or locked here" % (i, key))
+        if not r.get("lockable") and any(k in patch for k in ("lock", "key", "trap")):
+            raise ToolError("keys[%d]: only doors and containers have locks and traps" % i)
+        ops.append({"id": "props|" + key, "v": dict(edits.get("props", {}).get(key) or {}, **patch)})
+    if not ops:
+        raise ToolError("Give the keys of the objects.")
+    _send(ops, args.get("note") or "owner or lock of %d object(s)" % len(ops))
+    return json.dumps({"changed": [o["id"][len("props|"):] for o in ops], "set": patch})
+
+
 def t_move(args):
     edits = LIVE.edits()
     cells, ops, moved, notes = {}, [], [], []
@@ -490,6 +515,15 @@ TOOLS = [
     ("set_tag", "Set an added object's project tag, or null for none (one undo step).",
      {"key": {"type": "string"}, "tag": {"type": ["string", "null"]}, "note": NOTE}, ["key", "tag"],
      EDIT, t_set_tag),
+    ("set_owner_lock_trap", "Set who owns objects (an NPC, or a faction and its lowest rank, 0 = first), the global "
+     "variable that frees them, and a door's or container's lock level (1-100; 0 with a key: key only), key and trap "
+     "spell. null or \"\" clears a field; fields left out stay. One undo step.",
+     {"keys": {"type": "array", "items": {"type": "string"}},
+      "owner": {"type": ["string", "null"], "description": "NPC id"},
+      "faction": {"type": ["string", "null"]}, "rank": {"type": ["integer", "null"]},
+      "global": {"type": ["string", "null"]}, "lock": {"type": ["integer", "null"]},
+      "key": {"type": ["string", "null"], "description": "key item id"},
+      "trap": {"type": ["string", "null"], "description": "spell id"}, "note": NOTE}, ["keys"], EDIT, t_set_props),
     ("save", "Save the edits and build the plugin, as the user's Save button does. Only when the user asks.",
      {"label": {"type": "string", "description": "a name for the saved version"}}, [],
      dict(EDIT, destructiveHint=True), t_save),

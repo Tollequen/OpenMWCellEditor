@@ -106,6 +106,10 @@
   details.fold > .body { padding: 0 12px 12px; }
   label.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
   label.opt input[type=number] { width: 80px; }
+  .own-dialog { width: min(460px, 100%); }
+  .own-dialog label.opt > input[type=text], .own-dialog label.opt > select { flex: 0 1 62%; min-width: 0; }
+  .own-dialog .ow-lock { border-top: 1px solid var(--line-soft); margin-top: 10px; padding-top: 6px; }
+  #own-info { color: var(--dim); font-size: 12px; margin: 6px 0 4px; }
   .keys { color: var(--dim); font-size: 12px; line-height: 1.7; }
   .keys b { color: var(--text); font-weight: 600; }
   .note { color: var(--dim); font-size: 12px; }
@@ -664,6 +668,7 @@
     <button id="redo" class="icon" title="Redo (Ctrl/Cmd+Shift+Z)" disabled><i data-icon="redo"></i></button>
     <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i><span class="n-lbl">Save</span></button>
     <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button><button id="light-btn" aria-pressed="false">Simulate lighting</button></div>
+    <div class="toolrow"><button id="owned-btn" aria-pressed="false" title="Red boxes around the objects someone owns (taking them is stealing)">Show owned</button></div>
     <input type="checkbox" id="lock" checked hidden>
   </div>
   <div class="psec" id="sec-selected">
@@ -699,6 +704,10 @@
         <button id="reset" title="Back to original values">Reset</button>
         <button id="delete" title="Delete"><i data-icon="trash"></i>Delete</button>
       </div>
+    </div>
+    <div id="own-row" style="display:none">
+      <div id="own-info"></div>
+      <div class="row"><button id="own-edit" title="Who owns it, and its lock and trap"><i data-icon="lock"></i>Owner and lock…</button></div>
     </div>
     <div id="door-row" style="display:none">
       <div id="door-info"></div>
@@ -844,6 +853,7 @@
       <div id="npc-list"></div>
     </div>
   </div>
+  <datalist id="own-npcs"></datalist><datalist id="own-keys"></datalist><datalist id="own-spells"></datalist><datalist id="own-globals"></datalist>
   <datalist id="npc-items"></datalist><datalist id="npc-spells"></datalist><datalist id="npc-scripts"></datalist>
 </div>
 <div id="tb-add-menu" class="tb-pop" role="menu">

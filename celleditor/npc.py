@@ -283,12 +283,15 @@ class Index:
                 if tag == "ARMO":                         # AODT: type, weight, value, health, enchant, rating
                     t, _, _, _, _, rating = struct.unpack_from("<ifiiii", d.get("AODT", b"").ljust(24, b"\0"))
                     o.update(slots=list(ARMOR_SLOTS[t:t + 1]), rating=rating)
+                elif tag == "MISC" and len(d.get("MCDT", b"")) >= 12 and struct.unpack_from("<i", d["MCDT"], 8)[0] & 1:
+                    o["key"] = True                        # MCDT: weight, value, flags (1: a key)
                 elif tag == "CLOT":                       # CTDT: type, weight, value, enchant
                     t, _, value = struct.unpack_from("<ifH", d.get("CTDT", b"").ljust(12, b"\0"))
                     o.update(slots=list(CLOTHING_SLOTS[t]) if 0 <= t < len(CLOTHING_SLOTS) else [], value=value)
                 items.append(o)
         items.sort(key=lambda o: o["id"].lower())
         scripts = sorted((cstr(d["SCHD"][:32]) for d, _ in each("SCPT") if "SCHD" in d), key=str.lower)
+        globals_ = sorted((cstr(d["NAME"]) for d, _ in each("GLOB")), key=str.lower)
         skills = [list(v) for v in SKILL_DATA]
         for d, _ in each("SKIL"):
             k = struct.unpack_from("<i", d["INDX"])[0] if len(d.get("INDX", b"")) >= 4 else -1
@@ -300,7 +303,7 @@ class Index:
             fl = dict(g[2]).get("FLTV")
             mult = struct.unpack("<f", fl)[0] if fl and len(fl) == 4 else mult
         self._lists = {"races": races, "classes": classes, "factions": factions, "parts": parts, "spells": spells,
-                       "items": items, "scripts": scripts, "skills": skills, "magickaMult": mult,
+                       "items": items, "scripts": scripts, "globals": globals_, "skills": skills, "magickaMult": mult,
                        "attributeNames": ATTRIBUTES, "skillNames": SKILLS}
         return self._lists
 

@@ -8,7 +8,7 @@ from .esp import _split_refs, cell_refs, cstr, parse_exterior, record, sub, zstr
 
 CELL_SIZE = 8192
 
-EDIT_KINDS = ("moved", "deleted", "replaced", "added", "attached", "doors", "groups", "npcs", "dialogue")
+EDIT_KINDS = ("moved", "deleted", "replaced", "added", "attached", "doors", "groups", "npcs", "dialogue", "props")
 
 
 def ref(obj_id, x, y, z, rot=0.0, dest=None, scale=None, lock=None, rot_x=0.0, owner=None, rot_y=0.0,
@@ -44,6 +44,65 @@ class RefNums:
             self.changed = False
 
 
+# --- Ownership, lock and trap ------------------------------------------------------
+# A reference's subrecords in the order OpenMW writes them (components/esm3/cellref.cpp, CellRef::save);
+# Morrowind.esm has UNAM right after NAME.
+
+SUB_ORDER = {s_: i for i, s_ in enumerate(("NAME", "UNAM", "XSCL", "ANAM", "BNAM", "XSOL", "CNAM", "INDX", "XCHG",
+                                           "INTV", "NAM9", "DODT", "DNAM", "FLTV", "KNAM", "TNAM", "DATA"))}
+PROPS = (("owner", "ANAM"), ("global", "BNAM"), ("faction", "CNAM"), ("rank", "INDX"), ("lock", "FLTV"),
+         ("key", "KNAM"), ("trap", "TNAM"))
+INT_PROPS = ("rank", "lock")
+_REF_FIELDS = {"key": "lock_key"}
+
+
+def props_of(r):
+    """A reference's ownership, lock and trap: {owner, global, faction, rank, lock, key, trap}, set ones only.
+    A key alone locks it (at level 0) in a content file."""
+    if r.get("props") is not None:
+        return r["props"]
+    if r.get("vanilla"):
+        d = dict(r["vanilla"][1])
+        return {k: struct.unpack("<i", d[s_][:4])[0] if k in INT_PROPS else cstr(d[s_])
+                for k, s_ in PROPS if s_ in d}
+    return {k: r[_REF_FIELDS.get(k, k)] for k, _ in PROPS if r.get(_REF_FIELDS.get(k, k)) not in (None, "")}
+
+
+def apply_props(r, patch):
+    """A reference with changed ownership, lock or trap (patch: {field: value}, None or "" clears it)."""
+    p = dict(props_of(r))
+    for k, v in patch.items():
+        if v in (None, ""):
+            p.pop(k, None)
+        elif k in dict(PROPS):
+            p[k] = int(v) if k in INT_PROPS else str(v)
+    if "faction" not in p:
+        p.pop("rank", None)
+    elif "rank" not in p:
+        p["rank"] = 0
+    if p.get("lock") == 0 and "key" not in p:
+        p.pop("lock")
+    if "key" in p and "lock" not in p:
+        p["lock"] = 0
+    r["props"] = p
+    for k, _ in PROPS:
+        r[_REF_FIELDS.get(k, k)] = p.get(k)
+
+
+def _prop_subs(props):
+    return [(s_, struct.pack("<i", props[k]) if k in INT_PROPS else zstr(props[k])) for k, s_ in PROPS if k in props]
+
+
+def _with_props(subs, props):
+    """Subrecords with the ownership, lock and trap ones replaced, each new one in its place."""
+    names = {s_ for _, s_ in PROPS}
+    out = [x for x in subs if x[0] not in names]
+    for x in sorted(_prop_subs(props), key=lambda x: SUB_ORDER[x[0]]):
+        k = next((i for i, (s_, _) in enumerate(out) if SUB_ORDER.get(s_, -1) > SUB_ORDER[x[0]]), len(out))
+        out.insert(k, x)
+    return out
+
+
 def encode_refs(refs, refnums):
     """The subrecords of new references."""
     out = []
@@ -51,17 +110,14 @@ def encode_refs(refs, refnums):
         subs = [sub("FRMR", struct.pack("<I", refnums.get(r["key"]))), sub("NAME", zstr(r["id"]))]
         if r["scale"] is not None:
             subs.append(sub("XSCL", struct.pack("<f", r["scale"])))
-        if r.get("owner"):
-            subs.append(sub("ANAM", zstr(r["owner"])))
+        props = _prop_subs(props_of(r))
+        subs += [sub(s_, v) for s_, v in props if SUB_ORDER[s_] < SUB_ORDER["DODT"]]
         if r["dest"] is not None:
             cell, (dx, dy, dz), heading = r["dest"]
             subs.append(sub("DODT", struct.pack("<6f", dx, dy, dz, 0.0, 0.0, heading)))
             if cell:                          # no DNAM: a door to the exterior world
                 subs.append(sub("DNAM", zstr(cell)))
-        if r["lock"] is not None:
-            subs.append(sub("FLTV", struct.pack("<i", r["lock"])))
-        if r.get("lock_key"):
-            subs.append(sub("KNAM", zstr(r["lock_key"])))
+        subs += [sub(s_, v) for s_, v in props if SUB_ORDER[s_] > SUB_ORDER["DNAM"]]
         subs.append(sub("DATA", struct.pack("<6f", *r["pos"], *r["rot"])))
         out.append(b"".join(subs))
     return out
@@ -71,7 +127,7 @@ def encode_refs(refs, refnums):
 
 def empty_edits():
     return {"moved": {}, "deleted": [], "replaced": {}, "added": [], "attached": {}, "doors": {}, "groups": {},
-            "npcs": {}, "dialogue": {}}
+            "npcs": {}, "dialogue": {}, "props": {}}
 
 
 def dest_of(subs):
@@ -99,7 +155,7 @@ def ref_key(cell, r):
 def edited_cells(edits):
     """The cells the layout edits touch."""
     cells = {k.split("|")[0] for k in list(edits["moved"]) + edits["deleted"] + list(edits["replaced"])
-             + list(edits.get("doors", {})) if "|vanilla|" in k}
+             + list(edits.get("doors", {})) + list(edits.get("props", {})) if "|vanilla|" in k}
     return cells | {a["cell"] for a in edits["added"]}
 
 
@@ -144,6 +200,9 @@ def apply_edits(cells, vanilla, edits, added_id=None, replaced_id=None):
             if new:
                 r["orig_id"] = r["id"]
                 r["id"] = new if r.get("vanilla") or not replaced_id else replaced_id(r["id"], new)
+            props = edits.get("props", {}).get(r["key"])
+            if props:
+                apply_props(r, props)
             door = edits.get("doors", {}).get(r["key"])
             if door:
                 r["dest"] = (door["cell"], tuple(door["pos"]), door["rot"][2])
@@ -156,7 +215,7 @@ def apply_edits(cells, vanilla, edits, added_id=None, replaced_id=None):
                 if m.get("scale") is not None:
                     r["scale"] = m["scale"]
             if r.get("vanilla"):
-                r["changed"] = bool(new or m or door or r["key"] in deleted)
+                r["changed"] = bool(new or m or door or props or r["key"] in deleted)
                 r["deleted"] = r["key"] in deleted
         if not from_master:
             refs[:] = [r for r in refs if r["key"] not in deleted]
@@ -193,6 +252,8 @@ def encode_vanilla_override(r, master_index=0):
     subs = [(s_, v) for s_, v in subs if s_ not in ("MVRF", "CNDT")]
     if r.get("dest_edited"):
         subs = _with_dest(subs, r["dest"])
+    if r.get("props") is not None:
+        subs = _with_props(subs, r["props"])
     # XSCL goes right after NAME and UNAM, as the game writes it.
     scale = None if r.get("scale") in (None, 1.0) else sub("XSCL", struct.pack("<f", r["scale"]))
     for s_, v in subs:

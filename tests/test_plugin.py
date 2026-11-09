@@ -949,8 +949,10 @@ class Live(unittest.TestCase):
         e = {"moved": {"c|a|1": {"pos": [1, 2, 3], "rot": [0, 0, 1]}}, "deleted": ["c|b|2"], "replaced": {"c|d|3": "x"},
              "added": [{"uid": "u1", "cell": "c", "id": "y", "pos": [0, 0, 0], "rot": [0, 0, 0]}],
              "attached": {"added|u1": "c|d|3"}, "doors": {}, "groups": {"g1": ["c|a|1", "added|u1"]},
-             "npcs": {"fargoth": {"level": 5}}, "dialogue": {"ring|123": {"text": "Hello"}}}
+             "npcs": {"fargoth": {"level": 5}}, "dialogue": {"ring|123": {"text": "Hello"}},
+             "props": {"c|a|1": {"owner": "fargoth"}}}
         self.assertEqual(live.edits_of(live.entries(e)), e)
+        self.assertIn("props|c|a|1", live.entries(e))
         self.assertIn("npcs|fargoth", live.entries(e))
         self.assertIn("dialogue|ring|123", live.entries(e))
         self.assertIn("moved|c|a|1", live.entries(e))

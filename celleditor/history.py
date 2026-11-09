@@ -21,6 +21,8 @@ def states(e):
         out.setdefault(k, {})["attached"] = parent
     for k, d in e.get("doors", {}).items():
         out.setdefault(k, {})["door"] = d
+    for k, p in e.get("props", {}).items():
+        out.setdefault(k, {})["props"] = p
     for g, keys in e.get("groups", {}).items():
         for k in keys:
             out.setdefault(k, {})["group"] = g
