@@ -545,6 +545,7 @@ def _entry(r, clones, index):
             "tag": project.tag(r["id"]) or r.get("tag"), "orig": orig,
             "light": light_info(src, index) if m and m[0] == "LIGH" else None,
             "props": writer.props_of(r), "lockable": bool(m and m[0] in ("DOOR", "CONT")),
+            "container": bool(m and m[0] == "CONT"),
             "ownable": not (m and m[0] in ("NPC_", "CREA", "STAT"))}
 
 
@@ -730,6 +731,29 @@ def npc_body(oid, patch=None):
     return out
 
 
+def container_info(oid, edits=None):
+    """A container for the contents window: its fields, whether it can be edited, and whether it's the
+    project's own (a copy, or a record of the plugin placed only here), so it's edited without a copy."""
+    with LOCK:
+        c = project.containers().get(oid, edits)
+    if c is None:
+        raise KeyError(oid)
+    own_files = {os.path.basename(project.plugin).lower()}
+    if project.builds_base:
+        own_files.add(os.path.basename(project.generated_plugin).lower())
+    placed = 0
+    if c.get("file") and c["file"].lower() in own_files:
+        cells = _gather()[0]
+        placed = sum(1 for refs in cells.values() for r in refs if r["id"].lower() == oid.lower())
+    own = bool(c.get("copy_of")) or placed == 1
+    return dict(c, own=own, canEdit=project.can_edit_npcs and c["editable"], canCopy=project.can_edit_npcs)
+
+
+def container_new_id(base, taken=()):
+    with LOCK:
+        return {"id": project.containers().free_id(base, taken)}
+
+
 def npc_id(oid):
     """Whether an id is free for a new NPC."""
     t = project.npcs().find(oid)
@@ -781,6 +805,9 @@ def cell_data(name, edits=None):
     for k, v in ((edits or project.load_edits()).get("npcs") or {}).items():
         if v.get("new"):
             index[k] = ("NPC_", v.get("model") or "")
+    for k, v in ((edits or project.load_edits()).get("containers") or {}).items():
+        if v.get("new") and v.get("copy_of", "").lower() in index:
+            index[k] = index[v["copy_of"].lower()]
     refs = [_entry(r, clones, index) for r in placed]
     try:
         water = project.water(name)
@@ -1000,7 +1027,8 @@ def clean_edits(edits):
             "npcs": {k: v for k, v in sorted((edits.get("npcs") or {}).items()) if v},
             "dialogue": {k: v for k, v in sorted((edits.get("dialogue") or {}).items()) if v},
             "props": {k: {f: p[f] for f in sorted(p)} for k, p in sorted((edits.get("props") or {}).items())
-                      if p and k not in gone}}
+                      if p and k not in gone},
+            "containers": {k: v for k, v in sorted((edits.get("containers") or {}).items()) if v}}
 
 
 def _base_ids(edits):
@@ -1019,7 +1047,7 @@ def save(edits, label=""):
     clean = clean_edits(_base_ids(edits))
     path = project.file("edits")
     with LOCK:
-        if (clean["npcs"] or clean["dialogue"]) and project.can_edit_npcs:
+        if (clean["npcs"] or clean["dialogue"] or clean["containers"]) and project.can_edit_npcs:
             project.edits_override = clean
             try:
                 project.records_and_needs()
@@ -1055,6 +1083,12 @@ def revert(name, key=None):
         cur["npcs"].pop(oid, None)
         if oid in target.get("npcs", {}):
             cur["npcs"][oid] = target["npcs"][oid]
+        return save(cur, label="reverted")
+    if key.startswith("containers|"):
+        k = key[len("containers|"):]
+        cur["containers"].pop(k, None)
+        if k in target.get("containers", {}):
+            cur["containers"][k] = target["containers"][k]
         return save(cur, label="reverted")
     if key.startswith("dialogue|"):
         k = key[len("dialogue|"):]
@@ -1399,6 +1433,13 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(dict({"ok": True}, **done)).encode())
             if u.path == "/api/cell":
                 return self.reply(json.dumps(cell_data(body["name"], body.get("edits"))).encode())
+            if u.path == "/api/container":
+                try:
+                    return self.reply(json.dumps(container_info(body["id"], body.get("edits") or {})).encode())
+                except KeyError:
+                    return self.reply(b"{}", code=404)
+            if u.path == "/api/container/new-id":
+                return self.reply(json.dumps(container_new_id(body["base"], body.get("taken") or [])).encode())
             if u.path == "/api/npc/body":
                 out = npc_body(body["id"], body.get("npc"))
                 return self.reply(out if out is not None else b"{}", code=200 if out is not None else 404)

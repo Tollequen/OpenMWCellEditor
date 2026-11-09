@@ -30,6 +30,8 @@ def states(e):
         out["npcs|" + k] = {"npc": v}
     for k, v in e.get("dialogue", {}).items():
         out["dialogue|" + k] = {"response": v}
+    for k, v in e.get("containers", {}).items():
+        out["containers|" + k] = {"container": v}
     return out
 
 
@@ -41,6 +43,9 @@ def _label(key, state=None):
     if key.startswith("npcs|"):
         n = (state or {}).get("npc") or {}
         return "NPCs", n.get("id") or key[len("npcs|"):]
+    if key.startswith("containers|"):
+        c = (state or {}).get("container") or {}
+        return "Containers", c.get("id") or key[len("containers|"):]
     if key.startswith("dialogue|"):
         r = (state or {}).get("response") or {}
         topic = r.get("topic") or key.split("|")[1]

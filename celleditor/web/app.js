@@ -8,6 +8,7 @@ import { phoneButton } from './phone.js';
 import { icon, iconMask, fillIcons } from './icons.js';
 import { setupNpcEditor } from './npc.js';
 import { setSuggestions, suggest } from './suggest.js';
+import { setupContents } from './contents.js';
 import { setupGamepad } from './gamepad.js';
 
 const $ = (id) => document.getElementById(id);
@@ -609,6 +610,7 @@ function updateOwn() {
   const texts = new Set(refs.map((r) => propsText(r.props || {}, lockable)));
   $('own-info').textContent = texts.size === 1 ? [...texts][0] : 'Owners and locks differ';
   $('own-edit').disabled = !refs.every((r) => r.editable);
+  $('cont-edit').style.display = refs.length === 1 && refs[0].container ? '' : 'none';
   if (!owned.lists) { ownershipLists().then(updateOwn).catch(() => {}); return; }
   if (texts.size === 1) {
     owned.lists.then((names) => {
@@ -768,6 +770,21 @@ async function editOwnership() {
 }
 
 $('own-edit').addEventListener('click', editOwnership);
+
+const contentsWin = setupContents({ state, status, icon: itemIcon, entriesOf, diffOf,
+                                    changed: () => { updatePanel(); updateDirty(); } });
+function openContents() {
+  const r = state.selection.length === 1 && state.selected.userData.ref;
+  if (!r || !r.container) return;
+  if (document.pointerLockElement) pauseFly();
+  closeMenu();
+  contentsWin.open(r);
+}
+$('cont-edit').addEventListener('click', openContents);
+$('qa-contents').addEventListener('click', openContents);
+$('tb-cont').addEventListener('click', openContents);
+$('qa-own').addEventListener('click', editOwnership);
+$('tb-own').addEventListener('click', editOwnership);
 
 async function fillObject(obj) {
   const r = obj.userData.ref;
@@ -1065,6 +1082,8 @@ function updateTouchBar() {
     : n > 1 ? `${n} objects` : r ? r.src : 'Tap an object';
   $('tb-nudge').style.display = roots().length && !state.multiTouch ? '' : 'none';
   $('tb-npc').style.display = n === 1 && r && r.kind === 'npc' ? '' : 'none';
+  $('tb-cont').style.display = n === 1 && r && r.container ? '' : 'none';
+  $('tb-own').style.display = n === 1 && r && r.ownable && r.editable && (r.container || r.isDoor) ? '' : 'none';
   const door = n === 1 && r && doorOf(r);
   $('tb-door').style.display = door && door.cell ? '' : 'none';
   if (door && door.cell) $('tb-door').title = `Go through the door (to ${door.cell})`;
@@ -1156,11 +1175,15 @@ function updateQuickActs() {
   const npc = !!(r && r.kind === 'npc');
   const door = r && r.isDoor ? doorOf(r) : null;
   const go = !!(door && door.cell), set = !!(r && r.isDoor && r.editable);
+  const cont = !!(r && r.container);
+  const own = !!(r && r.ownable && r.editable && (cont || r.isDoor || isOwned(r.props)));
   $('qa-npc').style.display = npc ? '' : 'none';
   $('qa-go').style.display = go ? '' : 'none';
   $('qa-set').style.display = set ? '' : 'none';
-  $('qa-name').textContent = npc ? r.src : door ? `Door to ${door.cell || 'the outside'}` : 'A door that leads nowhere';
-  $('quick-acts').classList.toggle('open', npc || go || set);
+  $('qa-contents').style.display = cont ? '' : 'none';
+  $('qa-own').style.display = own ? '' : 'none';
+  $('qa-name').textContent = npc || cont || !r?.isDoor ? r?.src || '' : door ? `Door to ${door.cell || 'the outside'}` : 'A door that leads nowhere';
+  $('quick-acts').classList.toggle('open', npc || go || set || cont || own);
 }
 $('qa-npc').addEventListener('click', () => $('edit-npc').click());
 $('qa-go').addEventListener('click', () => $('door-go').click());
@@ -1297,6 +1320,7 @@ function canonical(e) {
     npcs: entries(e.npcs, (v) => JSON.stringify(sortedKeys(v))),
     dialogue: entries(e.dialogue, (v) => JSON.stringify(sortedKeys(v))),
     props: entries(e.props, (v) => JSON.stringify(sortedKeys(v))),
+    containers: entries(e.containers, (v) => JSON.stringify(sortedKeys(v))),
   });
 }
 
@@ -1330,7 +1354,7 @@ function updateDirty() {
 
 function withSections(e) {
   return Object.assign({ moved: {}, deleted: [], replaced: {}, added: [], attached: {}, doors: {}, groups: {}, npcs: {}, dialogue: {},
-                         props: {} }, e);
+                         props: {}, containers: {} }, e);
 }
 
 function offerDraft() {
@@ -4067,7 +4091,8 @@ const listText = (xs) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).
 // What changed between two saves, e.g. "2 objects moved, 1 added, 1 NPC changed"
 function changesText(before, after) {
   const sets = { moved: new Set(), added: new Set(), deleted: new Set(), swapped: new Set(), restored: new Set(),
-                 doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), other: new Set() };
+                 doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), containers: new Set(),
+                 other: new Set() };
   for (const { id } of diffOf(before, after)) {
     const [sec, k] = splitId(id);
     if (sec === 'added') sets[!before.has(id) ? 'added' : !after.has(id) ? 'deleted' : 'moved'].add(id);
@@ -4078,6 +4103,7 @@ function changesText(before, after) {
     else if (sec === 'npcs') sets.npcs.add(k);
     else if (sec === 'dialogue') sets.responses.add(k);
     else if (sec === 'props') sets.props.add(k);
+    else if (sec === 'containers') sets.containers.add(k);
     else sets.other.add(k);
   }
   for (const k of sets.deleted) sets.moved.delete(k);
@@ -4087,6 +4113,7 @@ function changesText(before, after) {
     .map(([k, verb], i) => (i ? `${sets[k].size} ${verb}` : `${n(sets[k], 'object', 'objects')} ${verb}`));
   if (sets.doors.size) parts.push(`${n(sets.doors, 'door destination', 'door destinations')} changed`);
   if (sets.props.size) parts.push(`owner or lock of ${n(sets.props, 'object', 'objects')} changed`);
+  if (sets.containers.size) parts.push(`contents of ${n(sets.containers, 'container', 'containers')} changed`);
   if (sets.npcs.size) parts.push(`${n(sets.npcs, 'NPC', 'NPCs')} changed`);
   if (sets.responses.size) parts.push(`${n(sets.responses, 'response', 'responses')} changed`);
   if (!parts.length && sets.other.size) parts.push('attached or grouped objects changed');
@@ -4385,7 +4412,7 @@ function sendPicture(saved) {
 const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 const live = { shared: new Map(), sent: new Map(), timer: null, sending: null, again: false, ready: false,
                others: new Map(), lastWhere: '', whereAt: 0, refreshing: false, refreshAgain: false };
-const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props'];
+const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers'];
 const UA = navigator.userAgent;
 const DEVICE = /iPhone/.test(UA) ? 'iPhone' : /iPad/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1) ? 'iPad'
   : /Android/.test(UA) ? (/Mobile/.test(UA) ? 'Android phone' : 'Android tablet') : 'Computer';

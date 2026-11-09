@@ -950,7 +950,7 @@ class Live(unittest.TestCase):
              "added": [{"uid": "u1", "cell": "c", "id": "y", "pos": [0, 0, 0], "rot": [0, 0, 0]}],
              "attached": {"added|u1": "c|d|3"}, "doors": {}, "groups": {"g1": ["c|a|1", "added|u1"]},
              "npcs": {"fargoth": {"level": 5}}, "dialogue": {"ring|123": {"text": "Hello"}},
-             "props": {"c|a|1": {"owner": "fargoth"}}}
+             "props": {"c|a|1": {"owner": "fargoth"}}, "containers": {"chest_a": {"respawn": True}}}
         self.assertEqual(live.edits_of(live.entries(e)), e)
         self.assertIn("props|c|a|1", live.entries(e))
         self.assertIn("npcs|fargoth", live.entries(e))

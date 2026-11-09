@@ -10,7 +10,7 @@ import struct
 import sys
 from contextlib import redirect_stdout
 
-from . import dialogue as dial, esp, launcher, loadorder, models, npc, writer
+from . import containers, dialogue as dial, esp, launcher, loadorder, models, npc, writer
 
 DEFAULTS = {
     "name": None,
@@ -149,14 +149,28 @@ class Project:
         return self.dialogue().records(edits, os.path.basename(self.plugin)
                                        if self.in_place or self.builds_base else None)
 
+    def containers(self):
+        """The load order's containers."""
+        return containers.Containers(self.npcs())
+
+    def container_records(self):
+        """The edited and copied containers' records and the files they need."""
+        edits = self.load_edits().get("containers") or {}
+        if not edits:
+            return [], {}
+        return self.containers().records(edits)
+
     def records_and_needs(self):
-        """The plugin's NPC records and dialogue groups, and the files they need."""
+        """The plugin's object records [((tag, id), record)] (NPCs, containers), dialogue groups, and the files
+        they need."""
         npcs, need = self.npc_records()
+        conts, more_c = self.container_records()
         groups, more = self.dialogue_records()
         need = {k: list(v) for k, v in need.items()}
-        for k, v in more.items():
-            need.setdefault(k, []).extend(v)
-        return npcs, groups, need
+        for extra in (more_c, more):
+            for k, v in extra.items():
+                need.setdefault(k, []).extend(v)
+        return [(("NPC_", k), rec) for k, rec in npcs] + [(("CONT", k), rec) for k, rec in conts], groups, need
 
     def _records_load(self):
         """(load order, usable files) for the NPC and dialogue editors."""
@@ -205,7 +219,7 @@ class Project:
         exteriors = self.load.cells()[1]
         key_of = lambda g: esp.exterior_key(g, exteriors.get(g, ""))     # noqa: E731
         data, _, _ = writer.rewrite_plugin(gen, {}, {}, writer.RefNums(), masters, self._cell_key(key_of), key_of,
-                                           None, None, {("NPC_", k): rec for k, rec in npcs}, topics)
+                                           None, None, dict(npcs), topics)
         writer.write_file(self.plugin, data)
         return "wrote %s%s" % (os.path.basename(self.plugin), _npcs_text(npcs, topics)) if npcs or topics else ""
 
@@ -266,7 +280,7 @@ class Project:
         refnums = writer.RefNums(self.file("refnums"))
         data, written, count = writer.rewrite_plugin(
             self.file("base"), cells, vanilla, refnums, masters, self._cell_key(key_of), key_of, head_of,
-            lambda r: index[r["origin"].lower()], {("NPC_", k): rec for k, rec in npcs}, topics,
+            lambda r: index[r["origin"].lower()], dict(npcs), topics,
             persistent=self.persistent())
         writer.write_file(self.plugin, data)
         refnums.save()
@@ -487,8 +501,11 @@ class Project:
         return "\n".join(s for s in (out.getvalue().strip(), msg or "") if s)
 
 
-def _npcs_text(npcs, topics=()):
-    out = ", %d NPC%s" % (len(npcs), "" if len(npcs) == 1 else "s") if npcs else ""
+def _npcs_text(objects, topics=()):
+    out = ""
+    for tag, one, many in (("NPC_", "NPC", "NPCs"), ("CONT", "container", "containers")):
+        n = sum(1 for (t, _), _ in objects if t == tag)
+        out += ", %d %s" % (n, one if n == 1 else many) if n else ""
     if topics:
         out += ", %d topic%s" % (len(topics), "" if len(topics) == 1 else "s")
     return out
