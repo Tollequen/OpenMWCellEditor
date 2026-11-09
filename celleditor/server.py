@@ -695,7 +695,7 @@ def npc_dialogue(oid, edits):
 
 
 def npc_body(oid, patch=None):
-    """An NPC's body shapes as JSON (with the page's unsaved changes to it), or None for an unknown NPC."""
+    """An NPC's body as JSON, {outfit (Bodies.outfit), shapes} (with the page's unsaved changes to it), or None."""
     global _bodies
     key = json.dumps([oid.lower(), patch], sort_keys=True)
     if key in _body_cache:
@@ -720,7 +720,8 @@ def npc_body(oid, patch=None):
                 return mesh_bytes(path)
             except KeyError:
                 return None
-        out = _shapes_json(_bodies.shapes(fields, read))
+        out = b'{"outfit": %s, "shapes": %s}' % (json.dumps(_bodies.outfit(fields)).encode(),
+                                                 _shapes_json(_bodies.shapes(fields, read)))
     if len(_body_cache) > 500:
         _body_cache.clear()
     _body_cache[key] = out
@@ -950,6 +951,21 @@ def texture(name):
             data = project.game.read(p)
             if data is not None:
                 break
+        if data is None:
+            return None
+        _tex_cache[key] = data
+    return _tex_cache[key]
+
+
+def item_icon(name):
+    """An item's inventory icon (its ITEX, under icons\\), a .dds of the name first as OpenMW does."""
+    key = "icon|" + name.lower()
+    if key not in _tex_cache:
+        path = name.lower().replace("/", "\\").lstrip("\\")
+        if not path.startswith("icons\\"):
+            path = "icons\\" + path
+        stem, ext = os.path.splitext(path)
+        data = project.game.read(stem + ".dds") or project.game.read(stem + (ext or ".tga"))
         if data is None:
             return None
         _tex_cache[key] = data
@@ -1318,6 +1334,9 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.reply(b"{}", code=404)
                 with open(project.panel["script"], "rb") as f:
                     return self.reply(f.read(), "text/javascript; charset=utf-8")
+            if u.path == "/api/icon":
+                data = item_icon(q["name"])
+                return self.reply(data, "application/octet-stream") if data else self.reply(b"{}", code=404)
             if u.path == "/api/tex":
                 data = texture(q["name"])
                 return self.reply(data, "application/octet-stream") if data else self.reply(b"{}", code=404)
@@ -1375,7 +1394,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(cell_data(body["name"], body.get("edits"))).encode())
             if u.path == "/api/npc/body":
                 out = npc_body(body["id"], body.get("npc"))
-                return self.reply(out if out is not None else b"[]", code=200 if out is not None else 404)
+                return self.reply(out if out is not None else b"{}", code=200 if out is not None else 404)
             if u.path == "/api/npc/dialogue":
                 return self.reply(json.dumps(npc_dialogue(body["id"], body.get("edits") or {})).encode())
             if u.path == "/api/project/call":

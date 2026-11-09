@@ -111,6 +111,11 @@ class Parts(unittest.TestCase):
         self.assertEqual(self.parts(items=[[1, "boots"]])["Right Foot"], "a\\boot.nif")
         self.assertNotIn("Right Foot", self.parts(race="khajiit", items=[[1, "boots"]]))
 
+    def test_outfit_says_why_items_are_not_worn(self):
+        o = self.b.outfit(dict(NPC, race="khajiit", items=[[1, "boots"], [1, "cheap shirt"], [1, "fine shirt"]]))
+        self.assertEqual(o["slots"], {"shirt": "fine shirt"})
+        self.assertEqual(o["notWorn"], {"boots": {"beast": "feet"}, "cheap shirt": {"instead": "fine shirt"}})
+
     def test_beasts_wear_open_helmets_only(self):
         self.assertEqual(self.parts(race="khajiit", items=[[1, "open helm"]])["Head (hair)"], "a\\helm.nif")
         self.assertEqual(self.parts(race="khajiit", items=[[1, "helm"]])["Head (hair)"], "b\\hair.nif")

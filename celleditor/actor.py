@@ -115,7 +115,7 @@ class Bodies:
         return fallback
 
     def equipped(self, items, beast):
-        """{slot: ("armor"|"clothing", record)} worn from an inventory, like InventoryStore::autoEquipArmor
+        """{slot: ("armor"|"clothing", record, item id)} worn from an inventory, like InventoryStore::autoEquipArmor
         (armour by its base rating, not the wearer's skills); beasts wear nothing with a head or foot part."""
         armor, clothing = self.armor(), self.clothing()
         slots = {}
@@ -149,7 +149,7 @@ class Bodies:
                                 continue
                         elif old[1][0] < rec[0]:
                             continue
-                slots[slot] = (kind, rec)
+                slots[slot] = (kind, rec, iid)
                 break
         return slots
 
@@ -176,7 +176,7 @@ class Bodies:
                 continue
             if slot == "helmet":
                 prio[HAIR], model[HAIR] = 0, None
-            kind, rec = item
+            kind, rec = item[:2]
             p = ((base + 1) << 1) + (1 if kind == "armor" else 0)
             for part, male, fem in rec[2]:
                 if part >= len(PART_BONES):
@@ -199,6 +199,30 @@ class Bodies:
             if prio[slot] < 1:
                 add(slot, 1, m)
         return {k: m for k, m in enumerate(model) if m and k != WEAPON}
+
+    def outfit(self, npc):
+        """{slots: {slot: item id}, notWorn: {item id: {"beast": "head"|"feet"} or {"instead": item id}}}
+        for the clothing and armour an NPC carries (lower case ids)."""
+        race = self.race(npc.get("race"))
+        beast = bool(race and race[0] & BEAST)
+        slots = self.equipped(npc.get("items") or [], beast)
+        worn = {v[2] for v in slots.values()}
+        armor, clothing = self.armor(), self.clothing()
+        not_worn = {}
+        for _, iid in npc.get("items") or []:
+            iid = iid.lower()
+            rec = armor.get(iid) or clothing.get(iid)
+            if rec is None or iid in worn:
+                continue
+            if beast and any(p[0] in BEAST_CANT for p in rec[2]):
+                not_worn[iid] = {"beast": "head" if any(p[0] == HEAD for p in rec[2]) else "feet"}
+                continue
+            t = rec[0]
+            cands = (ARMOR_SLOTS[t:t + 1] if iid in armor else CLOTHING_SLOTS[t] if 0 <= t < len(CLOTHING_SLOTS) else ())
+            other = next((slots[c][2] for c in cands if c in slots), None)
+            if other:
+                not_worn[iid] = {"instead": other}
+        return {"slots": {k: v[2] for k, v in slots.items()}, "notWorn": not_worn}
 
     def shapes(self, npc, read):
         """An NPC's shapes, its feet at the origin, scaled by its race; read(mesh path) -> bytes or None."""

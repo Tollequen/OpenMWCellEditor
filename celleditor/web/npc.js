@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 let api = null;
 let list = null, lists = null, canEdit = true;
 const bases = new Map();
-const ui = { id: null, panes: null, tab: 'general' };
+const ui = { id: null, panes: null, tab: 'general', outfit: { slots: {}, notWorn: {} }, outfitSig: '' };
 const TABS = [['general', 'General', 'General'], ['stats', 'Stats', 'Stats'], ['ai', 'AI and services', 'AI'],
               ['items', 'Inventory and spells', 'Items'], ['dialogue', 'Dialogue', 'Dialogue']];
 
@@ -186,6 +186,8 @@ async function show(id) {
     bases.set(id, await res.json());
   }
   ui.id = id;
+  ui.outfit = { slots: {}, notWorn: {} };
+  ui.outfitSig = '';
   if (![...$('npc-list').children].some((r) => r.dataset.id === id)) renderList();
   for (const row of $('npc-list').children) {
     row.classList?.toggle('sel', row.dataset.id === id);
@@ -315,6 +317,234 @@ function showTab(key) {
     b.setAttribute('aria-selected', b.dataset.tab === key);
   }
   for (const [k, pane] of Object.entries(ui.panes)) pane.classList.toggle('sel', k === key);
+  placePreview();
+}
+
+// --- The preview ---------------------------------------------------------------
+
+function previewSection(tab) {
+  const s = section('Looks', tab);
+  s.classList.add('npc-look');
+  const holder = s.appendChild(el('div', 'npc-preview'));
+  const bar = s.appendChild(el('div', 'npc-preview-bar'));
+  const whole = bar.appendChild(el('button', null, 'Whole body'));
+  whole.addEventListener('click', () => api.preview.whole());
+  const face = bar.appendChild(el('button', null, 'Face'));
+  face.addEventListener('click', () => api.preview.face());
+  bar.appendChild(el('span', 'npc-hint', 'Drag to turn, scroll to zoom'));
+  return holder;
+}
+
+function placePreview() {
+  const holder = ui.controls?.previews?.[ui.tab];
+  if (holder && api.preview.canvas().parentNode !== holder) holder.appendChild(api.preview.canvas());
+}
+
+function updatePreview() {
+  const id = ui.id;
+  api.preview.show(id).then((outfit) => {
+    if (!outfit || id !== ui.id || document.querySelector('.wardrobe')) return;
+    const sig = JSON.stringify(outfit);
+    if (sig !== ui.outfitSig) {
+      ui.outfitSig = sig;
+      ui.outfit = outfit;
+      fillItems(fields());
+      fillOutfit();
+    }
+  });
+}
+
+// --- Outfit and wardrobe -------------------------------------------------------
+
+const OUTFIT = [['helmet', 'Head'], ['amulet', 'Neck'], ['shirt', 'Shirt'], ['cuirass', 'Cuirass'], ['robe', 'Robe'],
+  ['lpauldron', 'Left pauldron'], ['rpauldron', 'Right pauldron'], ['lgauntlet', 'Left hand'],
+  ['rgauntlet', 'Right hand'], ['belt', 'Belt'], ['pants', 'Pants'], ['skirt', 'Skirt'], ['greaves', 'Greaves'],
+  ['boots', 'Feet'], ['carriedleft', 'Shield'], ['lring', 'Left ring'], ['rring', 'Right ring']];
+const wearable = (o) => (o.slots || []).length > 0;
+
+// an item's icon, loaded when it scrolls into view
+let iconWatch = null;
+function iconEl(name) {
+  const img = el('img', 'ic');
+  img.alt = '';
+  if (!name) return img;
+  iconWatch = iconWatch || new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      iconWatch.unobserve(e.target);
+      api.icon(e.target.dataset.icon).then((url) => { if (url) e.target.src = url; });
+    }
+  }, { rootMargin: '200px' });
+  img.dataset.icon = name;
+  iconWatch.observe(img);
+  return img;
+}
+const itemName = (id) => { const o = byId(lists.items, id); return o ? o.name || o.id : id; };
+const wornIds = () => new Set(Object.values(ui.outfit.slots));
+
+function notWornText(why) {
+  if (!why) return '';
+  if (why.beast) {
+    const race = byId(lists.races, fields().race);
+    return `Not worn: ${race ? race.name || race.id : 'this race'} can't wear ${why.beast === 'head' ? 'closed helmets' : 'shoes or boots'}.`;
+  }
+  return why.instead ? `Not worn: they wear their ${itemName(why.instead)} instead.` : '';
+}
+
+// the inventory with one item taken out (the first line with that id)
+function without(items, id) {
+  const k = items.findIndex((x) => x[1].toLowerCase() === (id || '').toLowerCase());
+  return k < 0 ? items.map((x) => [...x]) : items.filter((_, i) => i !== k).map((x) => [...x]);
+}
+
+function fillOutfit() {
+  const box = ui.controls.outfit;
+  if (!box) return;
+  const on = editable();
+  box.innerHTML = '';
+  for (const [slot, label] of OUTFIT) {
+    const id = ui.outfit.slots[slot];
+    const row = box.appendChild(el('div', 'npc-slot' + (id ? '' : ' empty')));
+    row.appendChild(el('span', 'slot', label));
+    row.appendChild(iconEl(id ? byId(lists.items, id)?.icon : null));
+    row.appendChild(el('span', 'item', id ? itemName(id) : '—')).title = id || '';
+    const change = row.appendChild(el('button', null, id ? 'Change…' : 'Choose…'));
+    change.disabled = !on;
+    change.addEventListener('click', () => wardrobe(slot));
+    const rm = row.appendChild(removeButton(() => setFields({ items: without(fields().items, id) })));
+    rm.disabled = !on || !id;
+    rm.style.visibility = id ? '' : 'hidden';
+  }
+  ui.controls.addCloth.disabled = !on;
+}
+
+function wardrobe(slot) {
+  const label = slot ? OUTFIT.find(([k]) => k === slot)[1] : null;
+  const current = slot ? ui.outfit.slots[slot] || null : null;
+  const base = fields().items;
+  const bg = dialog(`<h3>${slot ? `${label}: choose what they wear` : 'Add clothing or armour'}</h3>
+    <div class="wr">
+      <div class="wr-side">
+        <div class="wr-filters"><input type="search" class="wr-search" placeholder="Search by name or id"><select class="wr-slot"></select><span class="wr-views"><button class="icon wr-as-list" title="Show as a list">${icon('list')}</button><button class="icon wr-as-grid" title="Show as icons">${icon('grid')}</button></span></div>
+        <div class="wr-list" tabindex="0"></div>
+      </div>
+      <div class="wr-view"><div class="npc-preview wr-preview"></div><div class="wr-note"></div></div>
+    </div>
+    <div class="bar"><span class="npc-hint">Arrow keys try things on; Enter wears it</span><button class="wr-cancel">Cancel</button><button class="primary wr-wear">Wear</button></div>`);
+  const box = bg.querySelector('.dialog');
+  box.classList.add('wardrobe');
+  const q = (c) => box.querySelector(c);
+  const search = q('.wr-search'), filter = q('.wr-slot'), list = q('.wr-list'), note = q('.wr-note');
+  if (slot) filter.add(new Option(label, slot));
+  filter.add(new Option('All clothing and armour', ''));
+  for (const [k, l] of OUTFIT) if (k !== slot) filter.add(new Option(l, k));
+  q('.wr-preview').appendChild(api.preview.canvas());
+
+  const state = { rows: [], sel: 0, timer: null, grid: false };
+  try { state.grid = localStorage.getItem('ce-wardrobe-view') === 'grid'; } catch (err) { /* private mode */ }
+  const showView = () => {
+    list.classList.toggle('grid', state.grid);
+    q('.wr-as-list').classList.toggle('on', !state.grid);
+    q('.wr-as-grid').classList.toggle('on', state.grid);
+    list.children[state.sel]?.scrollIntoView({ block: 'nearest' });
+  };
+  const setView = (grid) => {
+    state.grid = grid;
+    try { localStorage.setItem('ce-wardrobe-view', grid ? 'grid' : 'list'); } catch (err) { /* private mode */ }
+    showView();
+  };
+  q('.wr-as-list').addEventListener('click', () => setView(false));
+  q('.wr-as-grid').addEventListener('click', () => setView(true));
+  const itemsFor = (id) => (id ? [...(slot ? without(base, current) : base.map((x) => [...x])), [1, id]]
+                               : without(base, current));
+  const tryOn = () => {
+    clearTimeout(state.timer);
+    state.timer = setTimeout(async () => {
+      const o = state.rows[state.sel];
+      if (!o) return;
+      const outfit = await api.preview.show(ui.id, itemsFor(o.id));
+      if (!outfit || state.rows[state.sel] !== o) return;
+      note.textContent = o.id ? notWornText(outfit.notWorn[o.id.toLowerCase()]) : '';
+    }, 60);
+  };
+  const choose = (k) => {
+    state.sel = Math.max(0, Math.min(state.rows.length - 1, k));
+    list.querySelectorAll('.wr-row').forEach((row, i) => row.classList.toggle('sel', i === state.sel));
+    list.children[state.sel]?.scrollIntoView({ block: 'nearest' });
+    tryOn();
+  };
+  const render = () => {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const want = filter.value;
+    const found = lists.items.filter((o) => wearable(o) && (!want || o.slots.includes(want))
+      && words.every((w) => o.id.toLowerCase().includes(w) || (o.name || '').toLowerCase().includes(w)))
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    state.rows = (slot && want === slot && !words.length ? [{ id: null, name: 'Nothing' }] : []).concat(found);
+    list.innerHTML = '';
+    state.rows.forEach((o, i) => {
+      const row = list.appendChild(el('div', 'wr-row'));
+      const about = o.id ? [o.id, o.type, o.rating != null ? `armour ${o.rating}` : `value ${o.value}`].join(' · ') : '';
+      row.appendChild(iconEl(o.icon));
+      const text = row.appendChild(el('div', 't'));
+      text.appendChild(el('div', 'n', o.name || o.id));
+      if (about) text.appendChild(el('div', 'd', about));
+      row.title = [o.name || o.id, about].filter(Boolean).join('\n');
+      row.addEventListener('click', () => choose(i));
+      row.addEventListener('dblclick', wear);
+    });
+    const k = state.rows.findIndex((o) => (o.id || null)?.toLowerCase() === current?.toLowerCase());
+    choose(k >= 0 && !search.value ? k : 0);
+    showView();
+  };
+  const close = () => bg.remove();
+  function wear() {
+    const o = state.rows[state.sel];
+    if (!o) return;
+    setFields({ items: itemsFor(o.id) });
+    close();
+  }
+  new MutationObserver((_, obs) => {
+    if (bg.isConnected) return;
+    obs.disconnect();
+    clearTimeout(state.timer);
+    placePreview();
+    updatePreview();
+  }).observe(document.body, { childList: true });
+  search.addEventListener('input', render);
+  filter.addEventListener('change', render);
+  box.addEventListener('keydown', (e) => {
+    const cols = state.grid ? getComputedStyle(list).gridTemplateColumns.split(' ').length : 1;
+    const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+    const step = { ArrowDown: cols, ArrowUp: -cols, ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    if (step && !(sideways && (!state.grid || e.target === search))) {   // left and right move in a grid, not in text
+      e.preventDefault();
+      choose(state.sel + step);
+    }
+    else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { e.preventDefault(); wear(); }
+  });
+  q('.wr-cancel').addEventListener('click', close);
+  q('.wr-wear').addEventListener('click', wear);
+  render();
+  if (!document.body.classList.contains('touch')) search.focus();   // a phone's keyboard would cover the list
+}
+
+// a select with buttons that step to the option before or after
+function stepper(sel) {
+  const box = el('div', 'npc-step');
+  const prev = el('button', 'icon', '‹');
+  const next = el('button', 'icon', '›');
+  prev.title = 'Previous';
+  next.title = 'Next';
+  const step = (d) => {
+    const n = sel.options.length;
+    if (!n || sel.disabled) return;
+    sel.selectedIndex = (Math.max(0, sel.selectedIndex) + d + n) % n;
+    sel.dispatchEvent(new Event('change'));
+  };
+  prev.addEventListener('click', () => step(-1));
+  next.addEventListener('click', () => step(1));
+  box.append(prev, sel, next);
+  return box;
 }
 
 function labelled(parent, text, control, cls = '') {
@@ -407,6 +637,7 @@ function build() {
   }
 
   const who = section('Identity', 'general');
+  c.previews = { general: previewSection('general') };
   const looks = section('Appearance & Script', 'general');
   c.name = labelled(who, 'Name', el('input'));
   c.name.type = 'text';
@@ -421,10 +652,11 @@ function build() {
   }));
   c.rank = labelled(who, 'Rank', el('select'));
   c.rank.addEventListener('change', () => setFields({ rank: Number(c.rank.value) }));
-  c.head = labelled(looks, 'Head', el('select'));
-  c.head.addEventListener('change', () => setFields({ head: c.head.value }));
-  c.hair = labelled(looks, 'Hair', el('select'));
-  c.hair.addEventListener('change', () => setFields({ hair: c.hair.value }));
+  for (const [k, text] of [['head', 'Head'], ['hair', 'Hair']]) {
+    c[k] = el('select');
+    c[k].addEventListener('change', () => setFields({ [k]: c[k].value }));
+    labelled(looks, text, stepper(c[k]));
+  }
   c.script = labelled(looks, 'Script', el('input'));
   c.script.type = 'text';
   suggest(c.script, 'npc-scripts');
@@ -524,6 +756,11 @@ function build() {
     }
   }
 
+  const dress = section('Outfit', 'items');
+  c.outfit = dress.appendChild(el('div', 'npc-outfit'));
+  c.addCloth = dress.appendChild(el('button', null, 'Add clothing or armour…'));
+  c.addCloth.addEventListener('click', () => wardrobe(null));
+  c.previews.items = previewSection('items');
   const inv = section('Inventory', 'items');
   c.items = inv.appendChild(el('div', 'npc-rows'));
   inv.appendChild(addRow('npc-items', 'Item ID (e.g. iron_dagger)', true, (id, count) => {
@@ -643,8 +880,10 @@ function fill() {
   c.servicesNote.textContent = f.autocalc ? `With auto-calculated stats, the NPC offers what the class ${cls ? cls.name : f.class} offers.` : '';
 
   fillItems(f);
+  fillOutfit();
   fillSpells(f);
   warnings(f);
+  updatePreview();
 }
 
 function fillWander(f) {
@@ -741,8 +980,12 @@ function fillItems(f) {
     if (document.activeElement !== c) c.value = count;
     if (document.activeElement !== i) i.value = id;
     const o = byId(lists.items, id);
-    what.textContent = o ? [o.name, o.type].filter(Boolean).join(' · ') : 'not in the load order';
+    const worn = wornIds().has(id.toLowerCase());
+    const why = notWornText(ui.outfit.notWorn[id.toLowerCase()]);
+    what.textContent = o ? [worn ? 'Worn' : why && 'Not worn', o.name, o.type].filter(Boolean).join(' · ') : 'not in the load order';
+    what.title = why;
     what.classList.toggle('bad', !o);
+    what.classList.toggle('worn', worn);
     c.disabled = i.disabled = rm.disabled = !on;
   });
 }

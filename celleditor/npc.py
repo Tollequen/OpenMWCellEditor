@@ -2,6 +2,7 @@
 import struct
 
 from . import esp
+from .actor import ARMOR_SLOTS, CLOTHING_SLOTS
 from .esp import cstr, zstr
 
 ATTRIBUTES = ("Strength", "Intelligence", "Willpower", "Agility", "Speed", "Endurance", "Personality", "Luck")
@@ -276,7 +277,16 @@ class Index:
         items = []
         for tag, kind in ITEM_TAGS.items():
             for d, _ in each(tag):
-                items.append({"id": cstr(d["NAME"]), "name": cstr(d.get("FNAM", b"")), "type": kind})
+                o = {"id": cstr(d["NAME"]), "name": cstr(d.get("FNAM", b"")), "type": kind}
+                if d.get("ITEX"):
+                    o["icon"] = cstr(d["ITEX"])
+                if tag == "ARMO":                         # AODT: type, weight, value, health, enchant, rating
+                    t, _, _, _, _, rating = struct.unpack_from("<ifiiii", d.get("AODT", b"").ljust(24, b"\0"))
+                    o.update(slots=list(ARMOR_SLOTS[t:t + 1]), rating=rating)
+                elif tag == "CLOT":                       # CTDT: type, weight, value, enchant
+                    t, _, value = struct.unpack_from("<ifH", d.get("CTDT", b"").ljust(12, b"\0"))
+                    o.update(slots=list(CLOTHING_SLOTS[t]) if 0 <= t < len(CLOTHING_SLOTS) else [], value=value)
+                items.append(o)
         items.sort(key=lambda o: o["id"].lower())
         scripts = sorted((cstr(d["SCHD"][:32]) for d, _ in each("SCPT") if "SCHD" in d), key=str.lower)
         skills = [list(v) for v in SKILL_DATA]

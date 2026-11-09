@@ -37,8 +37,8 @@ const touchParam = new URLSearchParams(location.search).get('touch');
 const TOUCH = touchParam != null ? touchParam === '1' : matchMedia('(pointer: coarse)').matches;
 if (TOUCH) document.body.classList.add('touch');
 
-let needsRender = true, previewNeedsRender = false;
-function requestRender() { needsRender = true; previewNeedsRender = true; }
+let needsRender = true, previewNeedsRender = false, npcViewNeedsRender = false;
+function requestRender() { needsRender = true; previewNeedsRender = true; npcViewNeedsRender = true; }
 
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -453,17 +453,20 @@ function bodyPatch(id) {
   return p.new ? p : Object.fromEntries(BODY_FIELDS.filter((k) => k in p).map((k) => [k, p[k]]));
 }
 
-const bodyKey = (id) => id.toLowerCase() + '|' + JSON.stringify(bodyPatch(id));
+const bodyKey = (id, patch = bodyPatch(id)) => id.toLowerCase() + '|' + JSON.stringify(patch);
+const NO_OUTFIT = { slots: {}, notWorn: {} };
 
-function npcBodyParts(id) {
-  const key = bodyKey(id);
+// patch: the NPC's changes to show (default: the unsaved ones)
+function npcBodyParts(id, patch = bodyPatch(id)) {
+  const key = bodyKey(id, patch);
   if (!bodyCache.has(key)) {
     if (bodyCache.size > 300) bodyCache.clear();
     bodyCache.set(key, fetch('/api/npc/body', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ id, npc: bodyPatch(id) }) })
-      .then((res) => (res.ok ? res.json() : []))
-      .then((shapes) => shapes.map((s) => ({ geometry: shapeGeometry(s), material: material(s) })))
-      .catch(() => []));
+                                                body: JSON.stringify({ id, npc: patch }) })
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((b) => ({ outfit: b.outfit || NO_OUTFIT,
+                      parts: (b.shapes || []).map((s) => ({ geometry: shapeGeometry(s), material: material(s) })) }))
+      .catch(() => ({ outfit: NO_OUTFIT, parts: [] })));
   }
   return bodyCache.get(key);
 }
@@ -550,7 +553,7 @@ async function fillObject(obj) {
     for (const p of await meshParts(r.mesh)) obj.add(new THREE.Mesh(p.geometry, p.material));
   } else if (r.kind === 'npc') {
     obj.userData.bodyKey = bodyKey(r.src);
-    const parts = await npcBodyParts(r.src);
+    const { parts } = await npcBodyParts(r.src);
     obj.clear();
     for (const p of parts) obj.add(new THREE.Mesh(p.geometry, p.material));
   }
@@ -1940,6 +1943,143 @@ async function drawThumb(mesh) {
     thumbs.group?.clear();
     for (const x of own) x.dispose();
   }
+}
+
+// --- Item icons (inventory icons, as image URLs) -----------------------------
+
+const iconCache = new Map();
+
+function itemIcon(name) {
+  if (!name) return Promise.resolve(null);
+  const key = name.toLowerCase();
+  if (!iconCache.has(key)) {
+    iconCache.set(key, fetch('/api/icon?name=' + encodeURIComponent(name))
+      .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(res.status))))
+      .then(decodeTexture)
+      .then(({ data, width, height }) => {
+        const c = document.createElement('canvas');
+        c.width = width;
+        c.height = height;
+        c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+                                                      width, height), 0, 0);
+        return c.toDataURL();
+      })
+      .catch(() => null));
+  }
+  return iconCache.get(key);
+}
+
+// --- NPC preview in the NPC editor ------------------------------------------
+// One canvas, moved between the tabs that show it; drag turns it, the wheel or a pinch zooms.
+
+const npcView = { renderer: null, scene: null, camera: null, group: null, canvas: null, token: 0, key: null,
+                  yaw: Math.PI, pitch: 0.1, dist: 260, center: new THREE.Vector3(0, 0, 65), pointers: new Map() };
+
+function npcViewCanvas() {
+  if (npcView.canvas) return npcView.canvas;
+  const c = npcView.canvas = document.createElement('canvas');
+  c.className = 'npc-preview-canvas';
+  npcView.renderer = new THREE.WebGLRenderer({ canvas: c, antialias: true });
+  npcView.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  npcView.scene = new THREE.Scene();
+  npcView.scene.background = new THREE.Color(0x1c1c24);
+  npcView.camera = new THREE.PerspectiveCamera(30, 1, 1, 10000);
+  npcView.camera.up.set(0, 0, 1);
+  npcView.scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+  const light = new THREE.DirectionalLight(0xfff2dd, 1.6);
+  light.position.set(-0.4, -0.3, 1);
+  npcView.camera.add(light);
+  npcView.scene.add(npcView.camera);
+  npcView.group = new THREE.Group();
+  npcView.scene.add(npcView.group);
+  const pinch = () => { const [a, b] = [...npcView.pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  let pinchStart = null;
+  c.addEventListener('pointerdown', (e) => {
+    c.setPointerCapture(e.pointerId);
+    npcView.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (npcView.pointers.size === 2) pinchStart = { d: pinch(), dist: npcView.dist };
+  });
+  c.addEventListener('pointermove', (e) => {
+    const p = npcView.pointers.get(e.pointerId);
+    if (!p) return;
+    if (npcView.pointers.size === 1) {
+      npcView.yaw -= (e.clientX - p.x) * 0.01;
+      npcView.pitch = Math.max(-1.2, Math.min(1.2, npcView.pitch + (e.clientY - p.y) * 0.01));
+    }
+    p.x = e.clientX; p.y = e.clientY;
+    if (npcView.pointers.size === 2 && pinchStart) npcView.dist = Math.max(40, pinchStart.dist * pinchStart.d / Math.max(1, pinch()));
+    npcViewNeedsRender = true;
+  });
+  const up = (e) => { npcView.pointers.delete(e.pointerId); pinchStart = null; };
+  c.addEventListener('pointerup', up);
+  c.addEventListener('pointercancel', up);
+  c.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    npcView.dist = Math.max(40, Math.min(1000, npcView.dist * Math.exp(e.deltaY * 0.001)));
+    npcViewNeedsRender = true;
+  }, { passive: false });
+  new ResizeObserver(() => { npcViewNeedsRender = true; }).observe(c);
+  return c;
+}
+
+// shows an NPC with the page's unsaved changes, or carrying items instead; resolves to its outfit
+async function showNpcPreview(id, items = null) {
+  npcViewCanvas();
+  const patch = items ? { ...(bodyPatch(id) || {}), items } : bodyPatch(id);
+  const key = bodyKey(id, patch);
+  const token = ++npcView.token;
+  const { parts, outfit } = await npcBodyParts(id, patch);
+  if (token !== npcView.token) return null;
+  if (key !== npcView.key) {
+    const first = npcView.key == null || npcView.key.split('|')[0] !== key.split('|')[0];
+    npcView.key = key;
+    npcView.group.clear();
+    for (const p of parts) npcView.group.add(new THREE.Mesh(p.geometry, p.material));
+    if (first) npcPreviewWhole();
+    npcViewNeedsRender = true;
+  }
+  return outfit;
+}
+
+// the face, close up
+function npcPreviewFace() {
+  const box = new THREE.Box3().setFromObject(npcView.group);
+  if (box.isEmpty()) return;
+  npcView.center.set(0, 0, box.max.z - 14);
+  npcView.dist = 60;
+  npcView.yaw = Math.PI;
+  npcView.pitch = 0.05;
+  npcViewNeedsRender = true;
+}
+
+function npcPreviewWhole() {
+  const box = new THREE.Box3().setFromObject(npcView.group);
+  const h = box.isEmpty() ? 130 : box.max.z - box.min.z;
+  npcView.center.set(0, 0, box.isEmpty() ? 65 : box.min.z + h * 0.5);
+  npcView.dist = h * 1.9;
+  npcView.yaw = Math.PI;
+  npcView.pitch = 0.1;
+  npcViewNeedsRender = true;
+}
+
+function renderNpcPreview() {
+  const c = npcView.canvas;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  const r = npcView.renderer;
+  if (c.width !== Math.round(w * r.getPixelRatio()) || c.height !== Math.round(h * r.getPixelRatio())) {
+    r.setSize(w, h, false);
+    npcView.camera.aspect = w / h;
+  }
+  const { yaw, pitch, dist, center } = npcView;
+  npcView.camera.position.set(center.x + Math.sin(yaw) * Math.cos(pitch) * -dist,
+                              center.y + Math.cos(yaw) * Math.cos(pitch) * -dist,
+                              center.z + Math.sin(pitch) * dist);
+  npcView.camera.near = Math.max(0.5, dist / 200);
+  npcView.camera.far = dist * 20;
+  npcView.camera.updateProjectionMatrix();
+  npcView.camera.lookAt(center);
+  r.render(npcView.scene, npcView.camera);
 }
 
 // --- Object preview in the picker -------------------------------------------
@@ -3542,6 +3682,8 @@ $('save').addEventListener('click', save);
 
 const npcEditor = setupNpcEditor({
   state, status, save, changed: updateDirty, closed: resumeFlySoon,
+  preview: { canvas: npcViewCanvas, show: showNpcPreview, face: npcPreviewFace, whole: npcPreviewWhole },
+  icon: itemIcon,
   async placeCopy(n, fromId) {
     const o = { id: n.id, name: n.name, type: 'NPC', mesh: '' };
     const from = state.undo.length - 1, before = entriesOf(state.edits);
@@ -4451,6 +4593,10 @@ function frame(now) {
   if (needsRender || gizmo.dragging) {
     needsRender = false;
     renderView();
+  }
+  if (npcViewNeedsRender && npcView.canvas?.isConnected && npcEditor.isOpen()) {
+    npcViewNeedsRender = false;
+    renderNpcPreview();
   }
   if (previewNeedsRender) {
     previewNeedsRender = false;
