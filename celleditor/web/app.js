@@ -441,6 +441,43 @@ async function meshParts(path) {
   return meshCache.get(path);
 }
 
+// --- NPC bodies (race parts, head, hair and worn clothing, put together on the server) --------
+
+const bodyCache = new Map();
+const BODY_FIELDS = ['race', 'female', 'head', 'hair', 'items'];
+
+// the unsaved changes to an NPC that change how it looks
+function bodyPatch(id) {
+  const p = state.edits.npcs?.[id.toLowerCase()];
+  if (!p) return null;
+  return p.new ? p : Object.fromEntries(BODY_FIELDS.filter((k) => k in p).map((k) => [k, p[k]]));
+}
+
+const bodyKey = (id) => id.toLowerCase() + '|' + JSON.stringify(bodyPatch(id));
+
+function npcBodyParts(id) {
+  const key = bodyKey(id);
+  if (!bodyCache.has(key)) {
+    if (bodyCache.size > 300) bodyCache.clear();
+    bodyCache.set(key, fetch('/api/npc/body', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ id, npc: bodyPatch(id) }) })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((shapes) => shapes.map((s) => ({ geometry: shapeGeometry(s), material: material(s) })))
+      .catch(() => []));
+  }
+  return bodyCache.get(key);
+}
+
+// placed NPCs whose looks were changed (NPC editor, undo, another device) are drawn again
+function refreshNpcBodies() {
+  for (const obj of objByKey.values()) {
+    const r = obj.userData.ref;
+    if (r.kind === 'npc' && obj.userData.bodyKey !== undefined && obj.userData.bodyKey !== bodyKey(r.src)) {
+      fillObject(obj).then(() => { updateSelBoxes(); requestRender(); });
+    }
+  }
+}
+
 const placeholders = {
   npc: [new THREE.CapsuleGeometry(22, 80, 4, 12).rotateX(Math.PI / 2).translate(0, 0, 62),
         gameLit(new THREE.MeshLambertMaterial({ color: 0x5fa0e0 }))],
@@ -511,6 +548,11 @@ async function fillObject(obj) {
   obj.clear();
   if (r.kind === 'mesh') {
     for (const p of await meshParts(r.mesh)) obj.add(new THREE.Mesh(p.geometry, p.material));
+  } else if (r.kind === 'npc') {
+    obj.userData.bodyKey = bodyKey(r.src);
+    const parts = await npcBodyParts(r.src);
+    obj.clear();
+    for (const p of parts) obj.add(new THREE.Mesh(p.geometry, p.material));
   }
   obj.userData.noMesh = r.kind === 'mesh' && obj.children.length === 0;
   if (obj.children.length === 0) {
@@ -1054,6 +1096,7 @@ function updateDirty() {
   $('save').classList.toggle('dirty', state.dirty);
   $('save').title = state.dirty ? 'Save (Ctrl/Cmd+S): there are unsaved changes' : 'Save (Ctrl/Cmd+S): nothing unsaved';
   $('tb-save').textContent = state.dirty ? 'Save *' : 'Save';
+  refreshNpcBodies();
   syncSoon();
 }
 
@@ -4146,7 +4189,7 @@ function showChanges(ids, remote = true) {
       refresh = true;
     }
   }
-  if (ids.some((id) => id.startsWith('npcs|') || id.startsWith('dialogue|'))) npcEditor.refresh(ids);
+  if (ids.some((id) => id.startsWith('npcs|') || id.startsWith('dialogue|'))) { npcEditor.refresh(ids); refreshNpcBodies(); }
   refreshVisibility();
   updateSelBoxes();
   updatePanel();

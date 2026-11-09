@@ -10,7 +10,7 @@ import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import desktop, esp, geometry, launcher, mcp, models, nif, qr, writer
+from . import actor, desktop, esp, geometry, launcher, mcp, models, nif, npc, qr, writer
 from .gamedata import openmw_cfg, read_cfg
 from .history import History, states
 from .live import LIVE
@@ -24,6 +24,7 @@ history = None
 _models = _catalog = _land = None
 _lights = {}
 _mesh_cache, _tex_cache, _light_points = {}, {}, {}
+_bodies, _body_cache = None, {}
 _disk_meshes = set()
 
 
@@ -34,6 +35,7 @@ def setup(p):
     history = History(p.file("history"), p.migrate)
     _models = _catalog = _land = None
     _disk_meshes.clear()
+    _body_cache.clear()
     geometry.clear()
     LIVE.start(p.path, p.load_edits())
     if SETTINGS:
@@ -692,6 +694,39 @@ def npc_dialogue(oid, edits):
         return {"topics": project.dialogue().for_actor(oid, edits), "canEdit": project.can_edit_npcs}
 
 
+def npc_body(oid, patch=None):
+    """An NPC's body shapes as JSON (with the page's unsaved changes to it), or None for an unknown NPC."""
+    global _bodies
+    key = json.dumps([oid.lower(), patch], sort_keys=True)
+    if key in _body_cache:
+        return _body_cache[key]
+    with LOCK:
+        index = project.npcs()
+        if patch and patch.get("new"):
+            try:
+                fields = npc.new_fields(patch)
+            except ValueError:
+                return None
+        else:
+            n = index.npc(oid)
+            if n is None:
+                return None
+            fields = npc.apply(n["fields"], patch or {})
+        if _bodies is None or _bodies.index is not index:
+            _bodies = actor.Bodies(index)
+
+        def read(path):
+            try:
+                return mesh_bytes(path)
+            except KeyError:
+                return None
+        out = _shapes_json(_bodies.shapes(fields, read))
+    if len(_body_cache) > 500:
+        _body_cache.clear()
+    _body_cache[key] = out
+    return out
+
+
 def npc_id(oid):
     """Whether an id is free for a new NPC."""
     t = project.npcs().find(oid)
@@ -874,26 +909,30 @@ def mesh(path):
     """A mesh's shapes as JSON."""
     if path not in _mesh_cache:
         data = mesh_bytes(path)
-        out = []
         try:
             shapes = nif.shapes(data)
         except Exception as e:
             print("Couldn't read the mesh %s (%s: %s); it's shown as a box." % (path, type(e).__name__, e), flush=True)
             shapes = []
-        for s in shapes:
-            col = s["color"]
-            out.append({
-                "pos": [round(v, 3) for v in s["pos"]],
-                "normal": None if s["normal"] is None else [round(v, 4) for v in s["normal"]],
-                "uv": None if s["uv"] is None else [round(v, 5) for v in s["uv"]],
-                "color": None if col is None else [round(col[k], 3) for k in range(len(col)) if k % 4 != 3],
-                "index": list(s["index"]),
-                "texture": s["texture"], "blend": s["blend"], "alphaTest": s["alpha_test"],
-                "doubleSided": s["double_sided"], "diffuse": list(s["diffuse"]),
-                "emissive": list(s["emissive"]), "alpha": s["alpha"], "count": len(s["pos"]) // 3,
-            })
-        _mesh_cache[path] = json.dumps(out).encode()
+        _mesh_cache[path] = _shapes_json(shapes)
     return _mesh_cache[path]
+
+
+def _shapes_json(shapes):
+    out = []
+    for s in shapes:
+        col = s["color"]
+        out.append({
+            "pos": [round(v, 3) for v in s["pos"]],
+            "normal": None if s["normal"] is None else [round(v, 4) for v in s["normal"]],
+            "uv": None if s["uv"] is None else [round(v, 5) for v in s["uv"]],
+            "color": None if col is None else [round(col[k], 3) for k in range(len(col)) if k % 4 != 3],
+            "index": list(s["index"]),
+            "texture": s["texture"], "blend": s["blend"], "alphaTest": s["alpha_test"],
+            "doubleSided": s["double_sided"], "diffuse": list(s["diffuse"]),
+            "emissive": list(s["emissive"]), "alpha": s["alpha"], "count": len(s["pos"]) // 3,
+        })
+    return json.dumps(out).encode()
 
 
 def texture(name):
@@ -1334,6 +1373,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(dict({"ok": True}, **done)).encode())
             if u.path == "/api/cell":
                 return self.reply(json.dumps(cell_data(body["name"], body.get("edits"))).encode())
+            if u.path == "/api/npc/body":
+                out = npc_body(body["id"], body.get("npc"))
+                return self.reply(out if out is not None else b"[]", code=200 if out is not None else 404)
             if u.path == "/api/npc/dialogue":
                 return self.reply(json.dumps(npc_dialogue(body["id"], body.get("edits") or {})).encode())
             if u.path == "/api/project/call":
