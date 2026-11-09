@@ -379,7 +379,8 @@ function iconEl(name) {
   iconWatch.observe(img);
   return img;
 }
-const itemName = (id) => { const o = byId(lists.items, id); return o ? o.name || o.id : id; };
+const allItems = () => [...api.newItems(), ...lists.items];
+const itemName = (id) => { const o = byId(allItems(), id); return o ? o.name || o.id : id; };
 const wornIds = () => new Set(Object.values(ui.outfit.slots));
 
 function notWornText(why) {
@@ -406,7 +407,7 @@ function fillOutfit() {
     const id = ui.outfit.slots[slot];
     const row = box.appendChild(el('div', 'npc-slot' + (id ? '' : ' empty')));
     row.appendChild(el('span', 'slot', label));
-    row.appendChild(iconEl(id ? byId(lists.items, id)?.icon : null));
+    row.appendChild(iconEl(id ? byId(allItems(), id)?.icon : null));
     row.appendChild(el('span', 'item', id ? itemName(id) : '—')).title = id || '';
     const change = row.appendChild(el('button', null, id ? 'Change…' : 'Choose…'));
     change.disabled = !on;
@@ -476,7 +477,7 @@ function wardrobe(slot) {
   const render = () => {
     const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
     const want = filter.value;
-    const found = lists.items.filter((o) => wearable(o) && (!want || o.slots.includes(want))
+    const found = [...api.newItems(), ...lists.items].filter((o) => wearable(o) && (!want || o.slots.includes(want))
       && words.every((w) => o.id.toLowerCase().includes(w) || (o.name || '').toLowerCase().includes(w)))
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
     state.rows = (slot && want === slot && !words.length ? [{ id: null, name: 'Nothing' }] : []).concat(found);
@@ -979,7 +980,7 @@ function fillItems(f) {
     const [c, i, what, rm] = row.children;
     if (document.activeElement !== c) c.value = count;
     if (document.activeElement !== i) i.value = id;
-    const o = byId(lists.items, id);
+    const o = byId(allItems(), id);
     const worn = wornIds().has(id.toLowerCase());
     const why = notWornText(ui.outfit.notWorn[id.toLowerCase()]);
     what.textContent = o ? [worn ? 'Worn' : why && 'Not worn', o.name, o.type].filter(Boolean).join(' · ') : 'not in the load order';

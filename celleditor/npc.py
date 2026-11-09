@@ -263,12 +263,14 @@ class Index:
         for d, subs in each("FACT"):
             factions.append({"id": cstr(d["NAME"]), "name": cstr(d.get("FNAM", b"")),
                              "ranks": [cstr(v) for s, v in subs if s == "RNAM"]})
-        parts = []
+        parts, wear = [], []
         for d, _ in each("BODY"):
             b = d.get("BYDT", b"").ljust(4, b"\0")
             if b[3] == 0 and b[0] in (0, 1):                  # BYDT: a skin part that is a head (0) or hair (1)
                 parts.append({"id": cstr(d["NAME"]), "race": cstr(d.get("FNAM", b"")), "part": b[0],
                               "vampire": bool(b[1]), "female": bool(b[2] & 1)})
+            elif b[3] in (1, 2):                              # clothing (1) and armour (2) parts
+                wear.append({"id": cstr(d["NAME"]), "part": b[0], "female": bool(b[2] & 1), "armor": b[3] == 2})
         spells = []
         for d, _ in each("SPEL"):
             t = struct.unpack_from("<i", d.get("SPDT", b"").ljust(4, b"\0"))[0]
@@ -303,7 +305,7 @@ class Index:
             fl = dict(g[2]).get("FLTV")
             mult = struct.unpack("<f", fl)[0] if fl and len(fl) == 4 else mult
         self._lists = {"races": races, "classes": classes, "factions": factions, "parts": parts, "spells": spells,
-                       "items": items, "scripts": scripts, "globals": globals_, "skills": skills, "magickaMult": mult,
+                       "items": items, "scripts": scripts, "globals": globals_, "wearParts": wear, "skills": skills, "magickaMult": mult,
                        "attributeNames": ATTRIBUTES, "skillNames": SKILLS}
         return self._lists
 

@@ -56,15 +56,14 @@ function dialog(html, cls) {
 }
 
 // "Only this one" or "every one of this kind": resolves to 'one', 'all' or null
-function askScope(info) {
+export function askScope(info, noun = 'containers', what = 'The contents belong') {
   return new Promise((resolve) => {
-    const what = info.name || info.id;
-    const bg = dialog(`<h3>Change which containers?</h3>
-      <p>The contents belong to the kind <b></b>, which other containers in the game may use too.</p>
+    const bg = dialog(`<h3>Change which ${noun}?</h3>
+      <p>${what} to the kind <b></b>, which other ${noun} in the game may use too.</p>
       <label class="check"><input type="radio" name="cs" value="one" checked> <span>Only this one: it becomes a copy of its own</span></label>
       <label class="check"><input type="radio" name="cs" value="all"> <span>Every one of this kind, everywhere in the game</span></label>
       <div class="bar"><button class="cs-cancel">Cancel</button><button class="primary cs-ok">Change</button></div>`, 'scope-dialog');
-    bg.querySelector('b').textContent = `${what} (${info.id})`;
+    bg.querySelector('b').textContent = `${info.name || info.id} (${info.id})`;
     const done = (v) => { bg.remove(); resolve(v); };
     bg.querySelector('.cs-cancel').addEventListener('click', () => done(null));
     bg.querySelector('.cs-ok').addEventListener('click', () => done(bg.querySelector('input:checked').value));
@@ -76,7 +75,8 @@ function askScope(info) {
 async function open(r) {
   let info, names;
   try { [info, names] = await Promise.all([fetchContainer(r.src), itemLists()]); } catch (err) { api.status(err.message, true); return; }
-  const byId = new Map(names.items.map((o) => [o.id.toLowerCase(), o]));
+  const all = [...api.newItems(), ...names.items];
+  const byId = new Map(all.map((o) => [o.id.toLowerCase(), o]));
   const contents = info.contents.map((x) => [...x]);
   let respawn = info.respawn;
   // a record the project can't change can still be copied for this one container
@@ -167,7 +167,7 @@ async function open(r) {
   const render = () => {
     const words = q('.ct-search').value.toLowerCase().split(/\s+/).filter(Boolean);
     const type = q('.ct-type').value;
-    view.rows = names.items.filter((o) => (!type || o.type === type)
+    view.rows = all.filter((o) => (!type || o.type === type)
       && words.every((w) => o.id.toLowerCase().includes(w) || (o.name || '').toLowerCase().includes(w)))
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).slice(0, 600);
     list.innerHTML = '';

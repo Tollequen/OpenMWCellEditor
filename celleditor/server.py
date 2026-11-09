@@ -10,7 +10,7 @@ import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import actor, desktop, esp, geometry, launcher, mcp, models, nif, npc, qr, writer
+from . import actor, desktop, esp, geometry, items, launcher, mcp, models, nif, npc, qr, writer
 from .gamedata import openmw_cfg, read_cfg
 from .history import History, states
 from .live import LIVE
@@ -36,6 +36,7 @@ def setup(p):
     _models = _catalog = _land = None
     _disk_meshes.clear()
     _body_cache.clear()
+    _listings.clear()
     geometry.clear()
     LIVE.start(p.path, p.load_edits())
     if SETTINGS:
@@ -545,7 +546,7 @@ def _entry(r, clones, index):
             "tag": project.tag(r["id"]) or r.get("tag"), "orig": orig,
             "light": light_info(src, index) if m and m[0] == "LIGH" else None,
             "props": writer.props_of(r), "lockable": bool(m and m[0] in ("DOOR", "CONT")),
-            "container": bool(m and m[0] == "CONT"),
+            "container": bool(m and m[0] == "CONT"), "item": bool(m and m[0] in items.KINDS),
             "ownable": not (m and m[0] in ("NPC_", "CREA", "STAT"))}
 
 
@@ -749,6 +750,41 @@ def container_info(oid, edits=None):
     return dict(c, own=own, canEdit=project.can_edit_npcs and c["editable"], canCopy=project.can_edit_npcs)
 
 
+def item_info(oid, edits=None):
+    """An item for the item editor: its fields, and whether it can be edited or only copied."""
+    with LOCK:
+        it = project.items().get(oid, edits)
+    if it is None:
+        raise KeyError(oid)
+    own_files = {os.path.basename(project.plugin).lower()}
+    if project.builds_base:
+        own_files.add(os.path.basename(project.generated_plugin).lower())
+    own = bool(it.get("new")) or bool(it.get("file") and it["file"].lower() in own_files)
+    return dict(it, own=own, canEdit=project.can_edit_npcs and it["editable"], canCopy=project.can_edit_npcs)
+
+
+def item_new_id(base, taken=()):
+    with LOCK:
+        return {"id": project.items().free_id(base, taken)}
+
+
+_listings = {}
+
+
+def game_files(folder, query, limit=200):
+    """Meshes or icons of the game whose path has every word of the query."""
+    exts = {"meshes": (".nif",), "icons": (".tga", ".dds", ".bmp")}.get(folder)
+    if not exts:
+        raise KeyError(folder)
+    if folder not in _listings:
+        _listings[folder] = project.game.listing(folder, exts)
+    words = query.lower().replace("/", "\\").split()
+    found = [f for f in _listings[folder] if all(w in f for w in words)]
+    if folder == "icons":                     # an icon is named .tga in records, as the game's are
+        found = sorted({os.path.splitext(f)[0] + ".tga" for f in found})
+    return {"files": found[:limit], "more": max(0, len(found) - limit)}
+
+
 def container_new_id(base, taken=()):
     with LOCK:
         return {"id": project.containers().free_id(base, taken)}
@@ -808,6 +844,9 @@ def cell_data(name, edits=None):
     for k, v in ((edits or project.load_edits()).get("containers") or {}).items():
         if v.get("new") and v.get("copy_of", "").lower() in index:
             index[k] = index[v["copy_of"].lower()]
+    for k, v in ((edits or project.load_edits()).get("items") or {}).items():
+        if v.get("model") is not None and (v.get("new") or k in index):
+            index[k] = (v.get("kind") or index[k][0], v["model"])
     refs = [_entry(r, clones, index) for r in placed]
     try:
         water = project.water(name)
@@ -1028,7 +1067,8 @@ def clean_edits(edits):
             "dialogue": {k: v for k, v in sorted((edits.get("dialogue") or {}).items()) if v},
             "props": {k: {f: p[f] for f in sorted(p)} for k, p in sorted((edits.get("props") or {}).items())
                       if p and k not in gone},
-            "containers": {k: v for k, v in sorted((edits.get("containers") or {}).items()) if v}}
+            "containers": {k: v for k, v in sorted((edits.get("containers") or {}).items()) if v},
+            "items": {k: v for k, v in sorted((edits.get("items") or {}).items()) if v}}
 
 
 def _base_ids(edits):
@@ -1047,7 +1087,7 @@ def save(edits, label=""):
     clean = clean_edits(_base_ids(edits))
     path = project.file("edits")
     with LOCK:
-        if (clean["npcs"] or clean["dialogue"] or clean["containers"]) and project.can_edit_npcs:
+        if (clean["npcs"] or clean["dialogue"] or clean["containers"] or clean["items"]) and project.can_edit_npcs:
             project.edits_override = clean
             try:
                 project.records_and_needs()
@@ -1084,12 +1124,13 @@ def revert(name, key=None):
         if oid in target.get("npcs", {}):
             cur["npcs"][oid] = target["npcs"][oid]
         return save(cur, label="reverted")
-    if key.startswith("containers|"):
-        k = key[len("containers|"):]
-        cur["containers"].pop(k, None)
-        if k in target.get("containers", {}):
-            cur["containers"][k] = target["containers"][k]
-        return save(cur, label="reverted")
+    for sec in ("containers", "items"):
+        if key.startswith(sec + "|"):
+            k = key[len(sec) + 1:]
+            cur.setdefault(sec, {}).pop(k, None)
+            if k in target.get(sec, {}):
+                cur[sec][k] = target[sec][k]
+            return save(cur, label="reverted")
     if key.startswith("dialogue|"):
         k = key[len("dialogue|"):]
         cur["dialogue"].pop(k, None)
@@ -1436,6 +1477,18 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/container":
                 try:
                     return self.reply(json.dumps(container_info(body["id"], body.get("edits") or {})).encode())
+                except KeyError:
+                    return self.reply(b"{}", code=404)
+            if u.path == "/api/item":
+                try:
+                    return self.reply(json.dumps(item_info(body["id"], body.get("edits") or {})).encode())
+                except KeyError:
+                    return self.reply(b"{}", code=404)
+            if u.path == "/api/item/new-id":
+                return self.reply(json.dumps(item_new_id(body["base"], body.get("taken") or [])).encode())
+            if u.path == "/api/files":
+                try:
+                    return self.reply(json.dumps(game_files(body["folder"], body.get("query") or "")).encode())
                 except KeyError:
                     return self.reply(b"{}", code=404)
             if u.path == "/api/container/new-id":

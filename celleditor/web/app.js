@@ -9,6 +9,7 @@ import { icon, iconMask, fillIcons } from './icons.js';
 import { setupNpcEditor } from './npc.js';
 import { setSuggestions, suggest } from './suggest.js';
 import { setupContents } from './contents.js';
+import { setupItems } from './items.js';
 import { setupGamepad } from './gamepad.js';
 
 const $ = (id) => document.getElementById(id);
@@ -582,6 +583,12 @@ function ownershipLists() {
 
 const isOwned = (p) => !!(p && (p.owner || p.faction));
 
+// what a newly placed object of a catalog type can have (the server says it for loaded ones)
+function typeFlags(type) {
+  return { props: {}, item: ['Weapon', 'Armor', 'Clothing', 'Misc', 'Book'].includes(type), container: type === 'Container',
+           lockable: type === 'Container' || type === 'Door', ownable: !['Static', 'NPC', 'Creature'].includes(type) };
+}
+
 function propsText(p, lockable, names = {}) {
   const name = (id, list) => list?.find((x) => x.id.toLowerCase() === (id || '').toLowerCase())?.name || id;
   const parts = [];
@@ -611,6 +618,7 @@ function updateOwn() {
   $('own-info').textContent = texts.size === 1 ? [...texts][0] : 'Owners and locks differ';
   $('own-edit').disabled = !refs.every((r) => r.editable);
   $('cont-edit').style.display = refs.length === 1 && refs[0].container ? '' : 'none';
+  $('item-edit').style.display = refs.length === 1 && refs[0].item ? '' : 'none';
   if (!owned.lists) { ownershipLists().then(updateOwn).catch(() => {}); return; }
   if (texts.size === 1) {
     owned.lists.then((names) => {
@@ -670,6 +678,7 @@ async function editOwnership() {
   if (!refs.length) return;
   let names;
   try { names = await ownershipLists(); } catch (err) { status('The lists of NPCs and factions didn\'t load.', true); return; }
+  setSuggestions('own-keys', [...itemsWin.newItems(), ...names.items].filter((o) => o.key).map((o) => [o.id, o.name || '']));
   const lockable = refs.every((r) => r.lockable);
   const val = (k) => { const v = new Set(refs.map((r) => r.props?.[k] ?? '')); return v.size === 1 ? [...v][0] : null; };
   const kind = val('owner') === null || val('faction') === null ? null : val('owner') ? 'npc' : val('faction') ? 'faction' : '';
@@ -772,7 +781,22 @@ async function editOwnership() {
 $('own-edit').addEventListener('click', editOwnership);
 
 const contentsWin = setupContents({ state, status, icon: itemIcon, entriesOf, diffOf,
-                                    changed: () => { updatePanel(); updateDirty(); } });
+                                    changed: () => { updatePanel(); updateDirty(); },
+                                    newItems: () => itemsWin.newItems() });
+const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, entriesOf, diffOf,
+                              changed: () => { updatePanel(); updateDirty(); refreshCell(); },
+                              place: (o) => startPlacing('object', { o, opts: {} }) });
+function editItem() {
+  const r = state.selection.length === 1 && state.selected.userData.ref;
+  if (!r || !r.item) return;
+  if (document.pointerLockElement) pauseFly();
+  closeMenu();
+  itemsWin.edit(r);
+}
+$('item-edit').addEventListener('click', editItem);
+$('qa-item').addEventListener('click', editItem);
+$('tb-item').addEventListener('click', editItem);
+$('add-item').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); closeMenu(); itemsWin.create(); });
 function openContents() {
   const r = state.selection.length === 1 && state.selected.userData.ref;
   if (!r || !r.container) return;
@@ -1084,6 +1108,7 @@ function updateTouchBar() {
   $('tb-npc').style.display = n === 1 && r && r.kind === 'npc' ? '' : 'none';
   $('tb-cont').style.display = n === 1 && r && r.container ? '' : 'none';
   $('tb-own').style.display = n === 1 && r && r.ownable && r.editable && (r.container || r.isDoor) ? '' : 'none';
+  $('tb-item').style.display = n === 1 && r && r.item ? '' : 'none';
   const door = n === 1 && r && doorOf(r);
   $('tb-door').style.display = door && door.cell ? '' : 'none';
   if (door && door.cell) $('tb-door').title = `Go through the door (to ${door.cell})`;
@@ -1182,8 +1207,9 @@ function updateQuickActs() {
   $('qa-set').style.display = set ? '' : 'none';
   $('qa-contents').style.display = cont ? '' : 'none';
   $('qa-own').style.display = own ? '' : 'none';
+  $('qa-item').style.display = r && r.item ? '' : 'none';
   $('qa-name').textContent = npc || cont || !r?.isDoor ? r?.src || '' : door ? `Door to ${door.cell || 'the outside'}` : 'A door that leads nowhere';
-  $('quick-acts').classList.toggle('open', npc || go || set || cont || own);
+  $('quick-acts').classList.toggle('open', npc || go || set || cont || own || !!(r && r.item));
 }
 $('qa-npc').addEventListener('click', () => $('edit-npc').click());
 $('qa-go').addEventListener('click', () => $('door-go').click());
@@ -1321,6 +1347,7 @@ function canonical(e) {
     dialogue: entries(e.dialogue, (v) => JSON.stringify(sortedKeys(v))),
     props: entries(e.props, (v) => JSON.stringify(sortedKeys(v))),
     containers: entries(e.containers, (v) => JSON.stringify(sortedKeys(v))),
+    items: entries(e.items, (v) => JSON.stringify(sortedKeys(v))),
   });
 }
 
@@ -1354,7 +1381,7 @@ function updateDirty() {
 
 function withSections(e) {
   return Object.assign({ moved: {}, deleted: [], replaced: {}, added: [], attached: {}, doors: {}, groups: {}, npcs: {}, dialogue: {},
-                         props: {}, containers: {} }, e);
+                         props: {}, containers: {}, items: {} }, e);
 }
 
 function offerDraft() {
@@ -1633,7 +1660,8 @@ async function duplicateSelected(rename = null) {
     const tag = src.tag && !as && !isNewNpc(src.src) ? src.tag : null;
     const r = { key: 'added|' + uid, id: as || src.id, src: as || src.src, kind: src.kind, mesh: src.mesh, pos, rot: [...src.rot],
                 scale: src.scale, editable: true, origin: 'added', structure: false, isDoor: src.isDoor, door: src.door,
-                tag };
+                tag, props: { ...(src.props || {}) },
+                ...Object.fromEntries(['item', 'container', 'lockable', 'ownable'].map((k) => [k, src[k]])) };
     r.orig = { pos: [...r.pos], rot: [...r.rot] };
     state.edits.added.push({ uid, cell: state.cell.name, id: as || (tag ? src.src : src.id), pos: [...pos], rot: [...r.rot],
                              scale: src.scale === 1 ? 1 : src.scale, tag });
@@ -1871,7 +1899,9 @@ const withRecent = (onPick) => (o) => { noteRecent(o.id); return onPick(o); };
 
 async function pickObject(title, onPick, attach = null, action = 'Add', group = 0) {
   const fav = (o) => state.objectFavorites.includes(o.id);
-  const fresh = npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 }));
+  const fresh = [...npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 })),
+                 ...itemsWin.newItems().map((o) => Object.assign(o, { rank: -1,
+                   cat: TYPE_CATEGORY[o.type] || (o.type === 'Misc' ? (o.key ? 'Keys' : 'Clutter') : 'Other') }))];
   const items = [...fresh, ...await opening(getCatalog())];
   const files = [...new Set(items.map((o) => o.file).filter((f) => f && !OFFICIAL_FILES.includes(f.toLowerCase())))];
   const mods = files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]);
@@ -2493,7 +2523,7 @@ function addAt(hit, kind = 'object', preset = null) {
     const tag = (!isNewNpc(o.id) && state.newTag) || null;
     const npc = o.type === 'NPC';
     const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: npc ? 'npc' : 'mesh', mesh: npc ? null : o.mesh, pos: pos.toArray(),
-                rot: [0, 0, yaw], scale: 1, editable: true, origin: 'added', structure: false, tag };
+                rot: [0, 0, yaw], scale: 1, editable: true, origin: 'added', structure: false, tag, ...typeFlags(o.type) };
     r.orig = { pos: [...r.pos], rot: [...r.rot] };
     state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...r.pos], rot: [...r.rot], scale: 1, tag });
     state.cell.refs.push(r);
@@ -3932,7 +3962,7 @@ $('save').addEventListener('click', save);
 // --- NPCs ------------------------------------------------------------------
 
 const npcEditor = setupNpcEditor({
-  state, status, save, changed: updateDirty, closed: resumeFlySoon,
+  state, status, save, changed: updateDirty, closed: resumeFlySoon, newItems: () => itemsWin.newItems(),
   preview: { canvas: npcViewCanvas, show: showNpcPreview, face: npcPreviewFace, whole: npcPreviewWhole },
   icon: itemIcon,
   async placeCopy(n, fromId) {
@@ -4091,7 +4121,7 @@ const listText = (xs) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).
 // What changed between two saves, e.g. "2 objects moved, 1 added, 1 NPC changed"
 function changesText(before, after) {
   const sets = { moved: new Set(), added: new Set(), deleted: new Set(), swapped: new Set(), restored: new Set(),
-                 doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), containers: new Set(),
+                 doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), containers: new Set(), items: new Set(),
                  other: new Set() };
   for (const { id } of diffOf(before, after)) {
     const [sec, k] = splitId(id);
@@ -4104,6 +4134,7 @@ function changesText(before, after) {
     else if (sec === 'dialogue') sets.responses.add(k);
     else if (sec === 'props') sets.props.add(k);
     else if (sec === 'containers') sets.containers.add(k);
+    else if (sec === 'items') sets.items.add(k);
     else sets.other.add(k);
   }
   for (const k of sets.deleted) sets.moved.delete(k);
@@ -4114,6 +4145,7 @@ function changesText(before, after) {
   if (sets.doors.size) parts.push(`${n(sets.doors, 'door destination', 'door destinations')} changed`);
   if (sets.props.size) parts.push(`owner or lock of ${n(sets.props, 'object', 'objects')} changed`);
   if (sets.containers.size) parts.push(`contents of ${n(sets.containers, 'container', 'containers')} changed`);
+  if (sets.items.size) parts.push(`${n(sets.items, 'item', 'items')} made or changed`);
   if (sets.npcs.size) parts.push(`${n(sets.npcs, 'NPC', 'NPCs')} changed`);
   if (sets.responses.size) parts.push(`${n(sets.responses, 'response', 'responses')} changed`);
   if (!parts.length && sets.other.size) parts.push('attached or grouped objects changed');
@@ -4159,10 +4191,10 @@ async function save() {
 // markup, with shorter labels and icons; setLayout('classic') puts them back (each place is kept by a comment).
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
-  ['add-npc', 'n-add-pair'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
+  ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
   ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
-                      'add-npc': ['Add NPC…', 'NPC…'] };
+                      'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
 const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
                        'lock-btn': 'lock', 'light-btn': 'bulb' };
 const layoutHome = new Map();
@@ -4412,7 +4444,7 @@ function sendPicture(saved) {
 const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 const live = { shared: new Map(), sent: new Map(), timer: null, sending: null, again: false, ready: false,
                others: new Map(), lastWhere: '', whereAt: 0, refreshing: false, refreshAgain: false };
-const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers'];
+const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers', 'items'];
 const UA = navigator.userAgent;
 const DEVICE = /iPhone/.test(UA) ? 'iPhone' : /iPad/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1) ? 'iPad'
   : /Android/.test(UA) ? (/Mobile/.test(UA) ? 'Android phone' : 'Android tablet') : 'Computer';
@@ -4583,7 +4615,7 @@ function showChanges(ids, remote = true) {
       r.rot = [...(m ? m.rot : r.orig.rot)];
       r.scale = m?.scale ?? r.orig.scale ?? 1;
       applyTransform(obj);
-    } else if (sec === 'added' || sec === 'replaced' || sec === 'props') {
+    } else if (sec === 'added' || sec === 'replaced' || sec === 'props' || sec === 'items') {
       refresh = true;
     }
   }

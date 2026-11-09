@@ -10,7 +10,7 @@ import struct
 import sys
 from contextlib import redirect_stdout
 
-from . import containers, dialogue as dial, esp, launcher, loadorder, models, npc, writer
+from . import containers, items, dialogue as dial, esp, launcher, loadorder, models, npc, writer
 
 DEFAULTS = {
     "name": None,
@@ -160,17 +160,30 @@ class Project:
             return [], {}
         return self.containers().records(edits)
 
+    def items(self):
+        """The load order's weapons, armour, clothing, misc items and books."""
+        return items.Items(self.npcs())
+
+    def item_records(self):
+        """The edited and new items' records and the files they need."""
+        edits = self.load_edits().get("items") or {}
+        if not edits:
+            return [], {}
+        return self.items().records(edits)
+
     def records_and_needs(self):
         """The plugin's object records [((tag, id), record)] (NPCs, containers), dialogue groups, and the files
         they need."""
         npcs, need = self.npc_records()
         conts, more_c = self.container_records()
+        things, more_i = self.item_records()
         groups, more = self.dialogue_records()
         need = {k: list(v) for k, v in need.items()}
-        for extra in (more_c, more):
+        for extra in (more_c, more_i, more):
             for k, v in extra.items():
                 need.setdefault(k, []).extend(v)
-        return [(("NPC_", k), rec) for k, rec in npcs] + [(("CONT", k), rec) for k, rec in conts], groups, need
+        return ([(("NPC_", k), rec) for k, rec in npcs] + [(("CONT", k), rec) for k, rec in conts] + things,
+                groups, need)
 
     def _records_load(self):
         """(load order, usable files) for the NPC and dialogue editors."""
@@ -503,8 +516,9 @@ class Project:
 
 def _npcs_text(objects, topics=()):
     out = ""
-    for tag, one, many in (("NPC_", "NPC", "NPCs"), ("CONT", "container", "containers")):
-        n = sum(1 for (t, _), _ in objects if t == tag)
+    for tags, one, many in ((("NPC_",), "NPC", "NPCs"), (("CONT",), "container", "containers"),
+                            (tuple(items.KINDS), "item", "items")):
+        n = sum(1 for (t, _), _ in objects if t in tags)
         out += ", %d %s" % (n, one if n == 1 else many) if n else ""
     if topics:
         out += ", %d topic%s" % (len(topics), "" if len(topics) == 1 else "s")

@@ -90,7 +90,7 @@ def read_cfg(path):
     return out
 
 
-LOOSE_FOLDERS = ("meshes", "textures")
+LOOSE_FOLDERS = ("meshes", "textures", "icons")
 DEFAULT_CONTENT = ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm")
 
 
@@ -205,6 +205,12 @@ class GameData:
             if a.has(key):
                 return a.read(key)
         return None
+
+    def listing(self, folder, exts):
+        """The game's files in a folder (e.g. "meshes"), loose and archived, as paths inside it (lower case)."""
+        top = folder.lower().rstrip("\\") + "\\"
+        names = set(self.loose()) | {n for a in self.archives for n in a.files}
+        return sorted(n[len(top):] for n in names if n.startswith(top) and n.endswith(tuple(exts)))
 
     def has(self, name):
         key = name.lower().replace("/", "\\")

@@ -137,7 +137,7 @@
   body.layout-new #save { width: auto !important; padding: 4px 14px 4px 10px; gap: 7px; }
   body.layout-new #save.dirty { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
   body.layout-new #save.dirty::after { display: none; }
-  body.layout-new #n-add-pair { margin-top: 0; }
+  body.layout-new #n-add-pair { margin-top: 0; grid-template-columns: 1fr 1fr 1fr; }
   body.layout-new #n-add-pair button { height: 34px; font-weight: 600; }
   body.layout-new #n-modes { display: grid; grid-template-columns: repeat(3, 1fr); margin: 8px 0 2px;
                              border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
@@ -522,6 +522,34 @@
   .wr-list.grid .d { display: none; }
   .wr-row { border-left: 3px solid transparent; }
   .dialog.contents-dialog { width: min(920px, 100%); }
+  .dialog.item-dialog { width: min(900px, 100%); }
+  .it { display: flex; gap: 16px; max-height: min(600px, 68vh); }
+  .it-form { flex: 1; min-width: 0; overflow: auto; padding-right: 4px; }
+  .it-form label.opt > span { flex: none; width: 130px; color: var(--dim); font-size: 12px; }
+  .it-form label.opt > input, .it-form label.opt > select, .it-file { flex: 1; min-width: 0; }
+  .it-form label.opt > input[type=number] { width: auto; }
+  .it-file { display: flex; gap: 6px; }
+  .it-file input { flex: 1; min-width: 0; }
+  .it-text { width: 100%; box-sizing: border-box; margin-top: 6px; font: inherit; }
+  .it-parts { margin: 4px 0; }
+  .it-part { display: flex; gap: 4px; align-items: center; margin: 3px 0; }
+  .it-part select { width: 130px; flex: none; }
+  .it-part input { flex: 1; min-width: 0; }
+  .it-side { width: 300px; flex: none; display: flex; flex-direction: column; gap: 6px; }
+  .it-canvas { width: 100%; height: 300px; border-radius: 4px; display: block; touch-action: none; cursor: grab; }
+  .it-iconrow { display: flex; align-items: center; gap: 8px; }
+  .it-iconrow .ic { width: 48px; height: 48px; }
+  .item-dialog .bar .npc-hint { margin: 0 auto 0 0; }
+  .dialog.files-dialog { width: min(640px, 100%); display: flex; flex-direction: column; gap: 6px; }
+  .files-dialog .fb-list { flex: none; height: min(420px, 55vh); }
+  .files-dialog .fb-list .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .files-dialog .fb-list.grid .n { font-size: 10px; }
+  @media (max-width: 640px) {
+    .it { flex-direction: column; max-height: none; }
+    .it-side { width: auto; order: -1; }
+    .it-canvas { height: 200px; }
+    .it-form label.opt > span { width: 96px; }
+  }
   .ct { display: flex; gap: 14px; height: min(480px, 60vh); }
   .ct-inside { width: 320px; flex: none; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
   .ct-head { display: flex; align-items: center; justify-content: space-between; }
@@ -643,6 +671,7 @@
   <button id="qa-set" title="Pick the cell, then set where the player should arrive">Set destination…</button>
   <button id="qa-contents" title="What's inside"><i data-icon="chest"></i>Contents…</button>
   <button id="qa-own" title="Who owns it, and its lock and trap"><i data-icon="lock"></i>Owner and lock…</button>
+  <button id="qa-item" title="Its name, model, icon and stats"><i data-icon="sliders"></i>Edit item…</button>
 </div>
 <button id="mouselook" class="desktop-only" title="Fly mode: look around with the mouse (Tab)"><i data-icon="crosshair"></i>Fly mode <kbd>Tab</kbd></button>
 <div id="look-keys" aria-label="Keys">
@@ -732,7 +761,8 @@
     <div id="own-row" style="display:none">
       <div id="own-info"></div>
       <div class="row"><button id="own-edit" title="Who owns it, and its lock and trap"><i data-icon="lock"></i>Owner and lock…</button>
-        <button id="cont-edit" title="What's inside" style="display:none"><i data-icon="chest"></i>Contents…</button></div>
+        <button id="cont-edit" title="What's inside" style="display:none"><i data-icon="chest"></i>Contents…</button>
+        <button id="item-edit" title="Its name, model, icon and stats" style="display:none"><i data-icon="sliders"></i>Edit item…</button></div>
     </div>
     <div id="door-row" style="display:none">
       <div id="door-info"></div>
@@ -744,6 +774,7 @@
     <div class="pair">
       <button id="add" title="Or right-click a surface"><i data-icon="plus"></i>Add object…</button>
       <button id="add-npc" title="A new NPC: name them, then click where they should stand (or right-click a surface)"><i data-icon="person"></i>Add NPC…</button>
+      <button id="add-item" title="A new weapon, armour, clothing, misc item or book, made from scratch"><i data-icon="sliders"></i>New item…</button>
     </div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
   </div>
@@ -878,6 +909,7 @@
       <div id="npc-list"></div>
     </div>
   </div>
+  <datalist id="item-scripts"></datalist><datalist id="item-parts"></datalist>
   <datalist id="own-npcs"></datalist><datalist id="own-keys"></datalist><datalist id="own-spells"></datalist><datalist id="own-globals"></datalist>
   <datalist id="npc-items"></datalist><datalist id="npc-spells"></datalist><datalist id="npc-scripts"></datalist>
 </div>
@@ -895,6 +927,7 @@
       <button id="tb-npc" class="icon tb-normal" title="Edit this NPC" style="display:none"><i data-icon="person"></i></button>
       <button id="tb-cont" class="icon tb-normal" title="Contents" style="display:none"><i data-icon="chest"></i></button>
       <button id="tb-own" class="icon tb-normal" title="Owner and lock" style="display:none"><i data-icon="lock"></i></button>
+      <button id="tb-item" class="icon tb-normal" title="Edit item" style="display:none"><i data-icon="sliders"></i></button>
       <span id="tb-name">Tap an object</span>
       <button id="tb-move" class="icon on tb-normal" title="Move"><i data-icon="move"></i></button>
       <button id="tb-turn" class="icon tb-normal" title="Rotate"><i data-icon="rotate"></i></button>
