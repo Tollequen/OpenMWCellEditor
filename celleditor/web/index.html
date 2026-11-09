@@ -107,7 +107,16 @@
   label.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
   label.opt input[type=number] { width: 80px; }
   .own-dialog { width: min(460px, 100%); }
-  .own-dialog label.opt > input[type=text], .own-dialog label.opt > select { flex: 0 1 62%; min-width: 0; }
+  .own-dialog label.opt > input[type=text], .own-dialog label.opt > select, .own-dialog label.opt > .pick-wrap { flex: 0 1 62%; min-width: 0; }
+  .pick-wrap { display: flex; gap: 4px; align-items: center; min-width: 0; }
+  .pick-wrap > input { flex: 1; min-width: 0; width: auto; }
+  button.pick-btn { flex: none; padding: 3px 5px; }
+  .it-form label.opt > .pick-wrap { flex: 1; }
+  .it-part .pick-wrap { flex: 1; }
+  .dialog.choose-dialog { width: min(560px, 100%); display: flex; flex-direction: column; gap: 6px; }
+  .choose-dialog .ch-list { flex: none; height: min(440px, 55vh); }
+  .choose-dialog .bar .spacer { flex: 1; }
+  .npc-line .pick-btn, .npc-add .pick-btn { padding: 2px 4px; }
   .own-dialog .ow-lock { border-top: 1px solid var(--line-soft); margin-top: 10px; padding-top: 6px; }
   #own-info { color: var(--dim); font-size: 12px; margin: 6px 0 4px; }
   .keys { color: var(--dim); font-size: 12px; line-height: 1.7; }

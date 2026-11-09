@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { icon } from './icons.js';
 import { setSuggestions, suggest } from './suggest.js';
 import { askScope } from './contents.js';
+import { choose, withChooser } from './choose.js';
 
 let api = null;
 let lists = null, listData = null;
@@ -23,6 +24,11 @@ const PARTS = ['Head', 'Hair', 'Neck', 'Chest', 'Groin', 'Skirt', 'Right hand', 
   'Left wrist', 'Shield', 'Right forearm', 'Left forearm', 'Right upper arm', 'Left upper arm', 'Right foot',
   'Left foot', 'Right ankle', 'Left ankle', 'Right knee', 'Left knee', 'Right upper leg', 'Left upper leg',
   'Right pauldron', 'Left pauldron', 'Weapon', 'Tail'];
+
+// A body part record's kind (BYDT part), and the kind each worn slot (PARTS) takes
+const BODY_KINDS = ['Head', 'Hair', 'Neck', 'Chest', 'Groin', 'Hand', 'Wrist', 'Forearm', 'Upper arm', 'Foot', 'Ankle',
+  'Knee', 'Upper leg', 'Clavicle', 'Tail'];
+const SLOT_BODY = [0, 1, 2, 3, 4, 4, 5, 5, 6, 6, -1, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, -1, 14];
 
 export function setupItems(a) {
   api = a;
@@ -127,7 +133,7 @@ function viewer(canvas) {
 
 // --- File browser (models and icons) -------------------------------------------------
 
-function browse(folder, current) {
+export function browse(folder, current) {
   return new Promise((resolve) => {
     const bg = el('div', 'dialog-bg');
     bg.innerHTML = `<div class="dialog files-dialog"><h3>${folder === 'icons' ? 'Choose an icon' : 'Choose a model'}</h3>
@@ -247,7 +253,12 @@ function open(info, r) {
     if (opts.max) i.maxLength = opts.max;
     i.addEventListener('input', () => { f[k] = i.value.trim(); opts.after?.(); });
     if (opts.list) suggest(i, opts.list);
-    return row(label, i);
+    if (!opts.pick) return row(label, i);
+    i.disabled = !editable;
+    const l = form.appendChild(el('label', 'opt'));
+    l.appendChild(el('span', null, label));
+    l.appendChild(withChooser(i, opts.pick));
+    return i;
   };
   const num = (k, label, opts = {}) => {
     const i = el('input');
@@ -311,8 +322,12 @@ function open(info, r) {
     file('icon', 'Icon', 'icons', showIcon);
     num('value', 'Value', { min: 0 });
     num('weight', 'Weight', { step: 0.1, min: 0 });
-    text('script', 'Script', { placeholder: 'None', list: 'item-scripts' });
-    if (f.kind !== 'MISC') text('enchant', 'Enchantment', { placeholder: 'None (an enchantment id)' });
+    text('script', 'Script', { placeholder: 'None', list: 'item-scripts', pick: (cur) => choose({
+      title: 'Choose a script', items: listData.scripts.map((s) => ({ id: s })), current: cur, none: 'No script' }) });
+    if (f.kind !== 'MISC') {
+      text('enchant', 'Enchantment', { placeholder: 'None', pick: (cur) => choose({
+        title: 'Choose an enchantment', items: listData.enchants, current: cur, none: 'No enchantment' }) });
+    }
     if (f.kind === 'WEAP') {
       choice('wtype', 'Type', WEAPON_TYPES);
       num('health', 'Health', { min: 0 });
@@ -358,13 +373,18 @@ function open(info, r) {
           s.value = String(p[0]);
           s.addEventListener('change', () => { p[0] = Number(s.value); });
           for (const [k, ph] of [[1, 'male part'], [2, 'female (optional)']]) {
-            const inp = line.appendChild(el('input'));
+            const inp = el('input');
             inp.type = 'text';
             inp.placeholder = ph;
             inp.value = p[k];
             suggest(inp, 'item-parts');
             inp.addEventListener('input', () => { p[k] = inp.value.trim(); });
             inp.disabled = !editable;
+            line.appendChild(withChooser(inp, (cur) => choose({
+              title: `Choose the ${k === 2 ? 'female' : 'male'} body part`, current: cur, none: 'None',
+              type: BODY_KINDS[SLOT_BODY[p[0]]] || '',
+              items: listData.wearParts.filter((b) => b.armor === (f.kind === 'ARMO'))
+                .map((b) => ({ id: b.id, type: BODY_KINDS[b.part] || 'Other', note: b.female ? 'female' : '' })) })));
           }
           const rm = line.appendChild(el('button', 'ghost icon'));
           rm.innerHTML = icon('x');

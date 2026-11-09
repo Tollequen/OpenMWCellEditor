@@ -10,6 +10,7 @@ import { setupNpcEditor } from './npc.js';
 import { setSuggestions, suggest } from './suggest.js';
 import { setupContents } from './contents.js';
 import { setupItems } from './items.js';
+import { setupChoose, choose, withChooser } from './choose.js';
 import { setupGamepad } from './gamepad.js';
 
 const $ = (id) => document.getElementById(id);
@@ -575,7 +576,7 @@ function ownershipLists() {
       setSuggestions('own-keys', l.items.filter((o) => o.key).map((o) => [o.id, o.name || '']));
       setSuggestions('own-spells', l.spells.map((o) => [o.id, `${o.name || o.id} · ${o.type}`]));
       setSuggestions('own-globals', (l.globals || []).map((g) => [g, '']));
-      return { factions: l.factions, npcs: n.npcs, items: l.items, spells: l.spells };
+      return { factions: l.factions, npcs: n.npcs, items: l.items, spells: l.spells, globals: l.globals || [] };
     })
     .catch((err) => { owned.lists = null; throw err; });
   return owned.lists;
@@ -725,8 +726,18 @@ async function editOwnership() {
   q('ow-level').value = lock === null || lock === '' ? '' : lock;
   q('ow-key').value = val('key') ?? '';
   q('ow-trap').value = val('trap') ?? '';
+  const picks = {
+    'ow-npc': (cur) => choose({ title: 'Who owns it?', current: cur,
+                                items: names.npcs.map((n) => ({ id: n.id, name: n.name, note: [n.race, n.class].filter(Boolean).join(', ') })) }),
+    'ow-global': (cur) => choose({ title: 'Choose a global variable', current: cur, none: 'None',
+                                   items: names.globals.map((g) => ({ id: g })) }),
+    'ow-key': (cur) => choose({ title: 'Choose the key', current: cur, none: 'No key',
+                                items: [...itemsWin.newItems(), ...names.items].filter((o) => o.key) }),
+    'ow-trap': (cur) => choose({ title: 'Choose the trap', current: cur, none: 'No trap', items: names.spells }),
+  };
   for (const [id, list] of [['ow-npc', 'own-npcs'], ['ow-global', 'own-globals'], ['ow-key', 'own-keys'], ['ow-trap', 'own-spells']]) {
     suggest(q(id), list);
+    withChooser(q(id), picks[id]);
     if (val(id === 'ow-npc' ? 'owner' : id.slice(3)) === null) q(id).placeholder = '(differs)';
   }
   const show = () => {
@@ -780,6 +791,7 @@ async function editOwnership() {
 
 $('own-edit').addEventListener('click', editOwnership);
 
+setupChoose({ icon: itemIcon });
 const contentsWin = setupContents({ state, status, icon: itemIcon, entriesOf, diffOf,
                                     changed: () => { updatePanel(); updateDirty(); },
                                     newItems: () => itemsWin.newItems() });

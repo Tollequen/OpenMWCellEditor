@@ -2,6 +2,7 @@
 // INFOs form a linked list: no two edits may follow the same response
 import { icon } from './icons.js';
 import { isSuggestion, setSuggestions, suggest } from './suggest.js';
+import { choose, chooseButton, withChooser } from './choose.js';
 
 const $ = (id) => document.getElementById(id);
 let ctx = null;
@@ -79,6 +80,34 @@ async function reload() {
   fillTopicList();
   render();
 }
+
+// --- Pickers for the fields that take an id ----------------------------------------------
+
+let actors = null;
+function actorList() {
+  actors = actors || fetch('/api/npcs').then((r) => r.json())
+    .then((n) => [...n.npcs.map((o) => ({ id: o.id, name: o.name, type: 'NPC' })),
+                  ...(ctx.lists.creatures || []).map((o) => ({ id: o.id, name: o.name, type: 'Creature' }))])
+    .catch((err) => { actors = null; throw err; });
+  return actors;
+}
+
+const pickCell = (cur) => choose({ title: 'Choose a cell', current: cur, none: 'Any cell',
+                                   items: ctx.api.state.data.cells.map((c) => ({ id: c.name, type: c.exterior ? 'Exterior' : 'Interior' })) });
+const named = (list) => list.map((o) => ({ id: o.id, name: o.name }));
+
+// what a condition of a kind compares: resolves to an id, or undefined when there's nothing to choose from
+const CONDITION_PICKS = {
+  journal: (cur) => choose({ title: 'Choose a quest', current: cur, items: names.filter((t) => t.type === 4).map((t) => ({ id: t.name })) }),
+  item: (cur) => choose({ title: 'Choose an item', current: cur, items: [...ctx.api.newItems(), ...ctx.lists.items] }),
+  global: (cur) => choose({ title: 'Choose a global variable', current: cur, items: (ctx.lists.globals || []).map((g) => ({ id: g })) }),
+  dead: async (cur) => choose({ title: 'Choose who must be dead', current: cur, items: await actorList() }),
+  notId: async (cur) => choose({ title: 'Choose who the speaker isn\'t', current: cur, items: await actorList() }),
+  notFaction: (cur) => choose({ title: 'Choose a faction', current: cur, items: named(ctx.lists.factions) }),
+  notClass: (cur) => choose({ title: 'Choose a class', current: cur, items: named(ctx.lists.classes) }),
+  notRace: (cur) => choose({ title: 'Choose a race', current: cur, items: named(ctx.lists.races) }),
+  notCell: pickCell,
+};
 
 function fillTopicList() {
   for (const id of ['npc-topics', 'npc-quests']) {
@@ -202,7 +231,7 @@ function render() {
   const go = () => {
     const name = topic.value.trim();
     if (!name) { topic.focus(); return; }
-    const known = names.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    const known = names.find((x) => x.type !== 4 && x.name.toLowerCase() === name.toLowerCase());
     const greeting = name.match(/^greeting ([0-9])$/i);
     addResponse(name.toLowerCase(), known ? known.name : greeting ? `Greeting ${greeting[1]}` : name,
                 known ? known.type : greeting ? 2 : 0);
@@ -360,8 +389,10 @@ function responseCard(t, r, n, on) {
   ranks();
   fac.addEventListener('change', () => { setFields(r, { pcFaction: fac.value, pcRank: -1 }); ranks(); refreshSum(); });
   rank.addEventListener('change', () => { setFields(r, { pcRank: +rank.value }); refreshSum(); });
-  const cell = field('Only in cell', el('input'));
+  const cell = el('input');
+  field('Only in cell', withChooser(cell, pickCell));
   cell.type = 'text'; cell.value = r.fields.cell; cell.placeholder = 'Any cell';
+  cell.disabled = !on;
   cell.addEventListener('change', () => { setFields(r, { cell: cell.value.trim() }); refreshSum(); });
   const other = [r.fields.race && `race ${r.fields.race}`, r.fields.class && `class ${r.fields.class}`,
                  r.fields.faction && (r.fields.faction === 'FFFF' ? 'no faction' : `faction ${r.fields.faction}`),
@@ -428,10 +459,14 @@ function conditionRow(c, on, onSet) {
   const rm = el('button', 'ghost icon');
   rm.innerHTML = icon('x');
   rm.title = 'Remove the condition';
+  const pickName = chooseButton(name, (cur) => CONDITION_PICKS[kind.value](cur));
+  const nameBox = el('span', 'pick-wrap nm');
+  nameBox.append(name, pickName);
   const shape = () => {
     const k = kind.value;
     func.style.display = k === 'function' ? '' : 'none';
-    name.style.display = k === 'function' ? 'none' : '';
+    nameBox.style.display = k === 'function' ? 'none' : '';
+    pickName.style.display = CONDITION_PICKS[k] ? '' : 'none';
     suggest(name, k === 'journal' ? 'npc-quests' : k === 'item' ? 'npc-items' : '');
     name.placeholder = { journal: 'quest id', item: 'item id', dead: 'NPC or creature id', global: 'variable',
                          local: 'variable', notLocal: 'variable', notId: 'id', notFaction: 'faction id',
@@ -450,8 +485,8 @@ function conditionRow(c, on, onSet) {
   kind.addEventListener('change', () => { shape(); set(); });
   for (const x of [func, name, op, value]) x.addEventListener('change', set);
   rm.addEventListener('click', () => onSet(null));
-  kind.className = 'k'; func.className = 'f'; name.className = 'nm'; op.className = 'o'; rm.classList.add('rm');
-  row.append(kind, func, name, op, value, rm);
+  kind.className = 'k'; func.className = 'f'; op.className = 'o'; rm.classList.add('rm');
+  row.append(kind, func, nameBox, op, value, rm);
   for (const x of row.querySelectorAll('select, input, button')) x.disabled = !on;
   return row;
 }

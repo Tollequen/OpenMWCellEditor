@@ -1,6 +1,8 @@
 import { icon } from './icons.js';
 import { showDialogue, refreshDialogue } from './topics.js';
 import { setSuggestions, suggest } from './suggest.js';
+import { choose, chooseButton, withChooser } from './choose.js';
+import { browse } from './items.js';
 
 const $ = (id) => document.getElementById(id);
 let api = null;
@@ -658,12 +660,15 @@ function build() {
     c[k].addEventListener('change', () => setFields({ [k]: c[k].value }));
     labelled(looks, text, stepper(c[k]));
   }
-  c.script = labelled(looks, 'Script', el('input'));
+  c.script = el('input');
+  labelled(looks, 'Script', withChooser(c.script, (cur) => choose({
+    title: 'Choose a script', items: lists.scripts.map((s) => ({ id: s })), current: cur, none: 'No script' })));
   c.script.type = 'text';
   suggest(c.script, 'npc-scripts');
   c.script.placeholder = 'None';
   c.script.addEventListener('change', () => setFields({ script: c.script.value.trim() }));
-  c.model = labelled(looks, 'Animation', el('input'));
+  c.model = el('input');
+  labelled(looks, 'Animation', withChooser(c.model, (cur) => browse('meshes', cur)));
   c.model.type = 'text';
   c.model.placeholder = 'Usually empty (the race\'s body)';
   c.model.title = 'A special animation file (NIF), as some NPCs have; empty for most';
@@ -766,13 +771,13 @@ function build() {
   c.items = inv.appendChild(el('div', 'npc-rows'));
   inv.appendChild(addRow('npc-items', 'Item ID (e.g. iron_dagger)', true, (id, count) => {
     setFields({ items: [...fields().items, [count, id]] });
-  }));
+  }, pickItem));
   inv.appendChild(el('div', 'npc-hint', 'A negative count restocks: a merchant has that many again after a while.'));
   const sp = section('Spells', 'items');
   c.spells = sp.appendChild(el('div', 'npc-rows'));
   sp.appendChild(addRow('npc-spells', 'Spell ID (e.g. fire_bite)', false, (id) => {
     setFields({ spells: [...fields().spells, id] });
-  }));
+  }, pickSpell));
 
   c.items.dataset.empty = 'No items in inventory.';
   c.spells.dataset.empty = 'No spells assigned.';
@@ -787,7 +792,11 @@ function build() {
   fill();
 }
 
-function addRow(listId, placeholder, withCount, onAdd) {
+// what the pickers of the item and spell fields choose from
+const pickItem = (cur) => choose({ title: 'Choose an item', items: allItems(), current: cur });
+const pickSpell = (cur) => choose({ title: 'Choose a spell', items: lists.spells, current: cur });
+
+function addRow(listId, placeholder, withCount, onAdd, pick) {
   const row = el('div', 'npc-add');
   let count = null;
   if (withCount) {
@@ -813,6 +822,7 @@ function addRow(listId, placeholder, withCount, onAdd) {
   };
   b.addEventListener('click', add);
   id.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  if (pick) row.appendChild(chooseButton(id, pick, (v) => { if (v) add(); }));
   row.appendChild(b);
   return row;
 }
@@ -972,12 +982,12 @@ function fillItems(f) {
       items[i][1] = id.value.trim();
       setFields({ items: items.filter((x) => x[1]) });
     });
-    row.append(count, id, el('span', 'what'), removeButton(() => {
+    row.append(count, id, chooseButton(id, pickItem), el('span', 'what'), removeButton(() => {
       setFields({ items: fields().items.filter((_, k) => k !== i) });
     }));
     return row;
   }, (row, [count, id]) => {
-    const [c, i, what, rm] = row.children;
+    const [c, i, , what, rm] = row.children;
     if (document.activeElement !== c) c.value = count;
     if (document.activeElement !== i) i.value = id;
     const o = byId(allItems(), id);
@@ -1003,12 +1013,12 @@ function fillSpells(f) {
       spells[i] = id.value.trim();
       setFields({ spells: spells.filter(Boolean) });
     });
-    row.append(id, el('span', 'what'), removeButton(() => {
+    row.append(id, chooseButton(id, pickSpell), el('span', 'what'), removeButton(() => {
       setFields({ spells: fields().spells.filter((_, k) => k !== i) });
     }));
     return row;
   }, (row, id) => {
-    const [i, what, rm] = row.children;
+    const [i, , what, rm] = row.children;
     if (document.activeElement !== i) i.value = id;
     const o = byId(lists.spells, id);
     what.textContent = o ? `${o.name || o.id} · ${o.type}` : 'not in the load order';

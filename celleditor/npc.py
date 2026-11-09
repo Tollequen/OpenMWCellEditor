@@ -24,6 +24,7 @@ OBJECT_TAGS = {"ACTI": "an activator", "ALCH": "a potion", "APPA": "an apparatus
 ITEM_TAGS = {"WEAP": "Weapon", "ARMO": "Armor", "CLOT": "Clothing", "MISC": "Misc", "BOOK": "Book",
              "ALCH": "Potion", "INGR": "Ingredient", "APPA": "Apparatus", "LOCK": "Lockpick", "PROB": "Probe",
              "REPA": "Repair", "LIGH": "Light", "LEVI": "Leveled list"}
+ENCHANT_TYPES = ("Cast once", "Cast when strikes", "Cast when used", "Constant effect")
 SPELL_TYPES = ("Spell", "Ability", "Blight", "Disease", "Curse", "Power")
 FIELDS = ("id", "name", "model", "race", "class", "faction", "head", "hair", "script", "level", "autocalc",
           "attributes", "skills", "health", "magicka", "fatigue", "disposition", "reputation", "rank", "gold",
@@ -294,6 +295,11 @@ class Index:
         items.sort(key=lambda o: o["id"].lower())
         scripts = sorted((cstr(d["SCHD"][:32]) for d, _ in each("SCPT") if "SCHD" in d), key=str.lower)
         globals_ = sorted((cstr(d["NAME"]) for d, _ in each("GLOB")), key=str.lower)
+        enchants = []
+        for d, _ in each("ENCH"):                         # ENDT: type, cost, charge, flags
+            t = struct.unpack_from("<i", d.get("ENDT", b"").ljust(4, b"\0"))[0]
+            enchants.append({"id": cstr(d["NAME"]), "type": ENCHANT_TYPES[t] if 0 <= t < len(ENCHANT_TYPES) else "?"})
+        creatures = [{"id": cstr(d["NAME"]), "name": cstr(d.get("FNAM", b""))} for d, _ in each("CREA")]
         skills = [list(v) for v in SKILL_DATA]
         for d, _ in each("SKIL"):
             k = struct.unpack_from("<i", d["INDX"])[0] if len(d.get("INDX", b"")) >= 4 else -1
@@ -305,7 +311,8 @@ class Index:
             fl = dict(g[2]).get("FLTV")
             mult = struct.unpack("<f", fl)[0] if fl and len(fl) == 4 else mult
         self._lists = {"races": races, "classes": classes, "factions": factions, "parts": parts, "spells": spells,
-                       "items": items, "scripts": scripts, "globals": globals_, "wearParts": wear, "skills": skills, "magickaMult": mult,
+                       "items": items, "scripts": scripts, "globals": globals_, "wearParts": wear, "enchants": enchants,
+                       "creatures": creatures, "skills": skills, "magickaMult": mult,
                        "attributeNames": ATTRIBUTES, "skillNames": SKILLS}
         return self._lists
 

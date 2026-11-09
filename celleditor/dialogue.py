@@ -228,9 +228,8 @@ class Dialogue:
         return self._topics
 
     def names(self):
-        """[{name, type}] of the topics other than journals."""
-        return [{"name": t.name, "type": t.type} for k, t in sorted(self.topics().items())
-                if t.type in (TOPIC, GREETING, PERSUASION, VOICE)]
+        """[{name, type}] of the topics and journals."""
+        return [{"name": t.name, "type": t.type} for k, t in sorted(self.topics().items())]
 
     def base_fields(self, topic, i):
         n = topic.order.nodes[i]
