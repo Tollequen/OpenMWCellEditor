@@ -1036,6 +1036,11 @@ function sortedKeys(o) {
   return o;
 }
 
+// the edits as last saved, to say what a save changed
+function noteSaved(edits) {
+  state.savedEntries = entriesOf(withSections(JSON.parse(JSON.stringify(edits))));
+}
+
 function markSaved() {
   state.saved = canonical(state.edits);
   updateDirty();
@@ -2517,6 +2522,7 @@ async function revertTo(name, key) {
   if (!res.ok) { status('Revert failed: ' + res.message, true); return; }
   state.edits = withSections(res.edits);
   live.shared = entriesOf(state.edits);
+  noteSaved(res.edits);
   state.undo = [];
   state.redo = [];
   state.undoMark = 0;
@@ -3644,10 +3650,39 @@ function refresh() {
   updatePanel();
 }
 
+const listText = (xs) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+// What changed between two saves, e.g. "2 objects moved, 1 added, 1 NPC changed"
+function changesText(before, after) {
+  const sets = { moved: new Set(), added: new Set(), deleted: new Set(), swapped: new Set(), restored: new Set(),
+                 doors: new Set(), npcs: new Set(), responses: new Set(), other: new Set() };
+  for (const { id } of diffOf(before, after)) {
+    const [sec, k] = splitId(id);
+    if (sec === 'added') sets[!before.has(id) ? 'added' : !after.has(id) ? 'deleted' : 'moved'].add(id);
+    else if (sec === 'deleted') sets[after.has(id) ? 'deleted' : 'restored'].add(k);
+    else if (sec === 'moved') sets.moved.add(k);
+    else if (sec === 'replaced') sets.swapped.add(k);
+    else if (sec === 'doors') sets.doors.add(k);
+    else if (sec === 'npcs') sets.npcs.add(k);
+    else if (sec === 'dialogue') sets.responses.add(k);
+    else sets.other.add(k);
+  }
+  for (const k of sets.deleted) sets.moved.delete(k);
+  const n = (set, one, many) => `${set.size} ${set.size === 1 ? one : many}`;
+  const parts = [['moved', 'moved'], ['added', 'added'], ['deleted', 'deleted'], ['swapped', 'swapped'],
+                 ['restored', 'brought back']].filter(([k]) => sets[k].size)
+    .map(([k, verb], i) => (i ? `${sets[k].size} ${verb}` : `${n(sets[k], 'object', 'objects')} ${verb}`));
+  if (sets.doors.size) parts.push(`${n(sets.doors, 'door destination', 'door destinations')} changed`);
+  if (sets.npcs.size) parts.push(`${n(sets.npcs, 'NPC', 'NPCs')} changed`);
+  if (sets.responses.size) parts.push(`${n(sets.responses, 'response', 'responses')} changed`);
+  if (!parts.length && sets.other.size) parts.push('attached or grouped objects changed');
+  return parts.join(', ');
+}
+
 async function save() {
   if (busy) { status(busy); return false; }
   // with no changes it still writes the file again: what it's made from may have changed outside the editor
-  const changed = state.dirty;
+  const before = state.savedEntries || new Map();   // taken now: the "saved" event comes before the reply
   setBusy('Saving…');
   try {
     await flushAll();
@@ -3656,14 +3691,18 @@ async function save() {
     const out = await res.json();
     if (!out.ok) throw new Error(out.message);
     state.saved = canonical(out.edits);
+    noteSaved(out.edits);
     updateDirty();
     sendPicture(true);
     setBusy(null);
-    status((changed ? 'Saved' : 'No changes; written again') + `: ${out.moved} moved, ${out.added} added, ${out.replaced} swapped, ${out.deleted} deleted`
-           + `${out.doors ? `, ${out.doors} door${out.doors > 1 ? 's' : ''} redirected` : ''}`
-           + `${out.npcs ? `, ${out.npcs} NPC${out.npcs > 1 ? 's' : ''} changed or new` : ''}`
-           + `${out.responses ? `, ${out.responses} response${out.responses > 1 ? 's' : ''} changed or new` : ''}.\n`
-           + `${out.message}\nRestart OpenMW to see it in game.`, !!out.newMasters?.length);
+    if (out.message) console.info(out.message);
+    const plugin = state.data.project.plugin;
+    const what = changesText(before, state.savedEntries);
+    const masters = (out.newMasters || []).map((m) => m.file);
+    status((what ? `Saved ${plugin}: ${what}.` : `Saved ${plugin} (nothing new since the last save).`)
+           + (masters.length ? `\nIt now also needs ${listText(masters)}.` : '')
+           + (state.savedOnce ? '' : '\nRestart OpenMW to see the changes in game.'), masters.length > 0);
+    state.savedOnce = true;
     return true;
   } catch (err) {
     setBusy(null);
@@ -4060,6 +4099,7 @@ function onLive(ev) {
   } else if (ev.type === 'saved') {
     take(opsTo(ev.edits), null);
     state.saved = canonical(withSections(ev.edits));
+    noteSaved(ev.edits);
     updateDirty();
   } else if (ev.type === 'project') {
     try { sessionStorage.setItem('ce-note', ev.path === state.data.project.path ? 'same' : 'other'); } catch (err) { /* private mode */ }
@@ -4407,6 +4447,7 @@ function openFailed(detail) {
   } catch (err) { openFailed(err.message); return; }
   if (!res.ok || state.data.error) { openFailed(state.data.error); return; }
   state.saved = canonical(withSections(state.data.edits));
+  noteSaved(state.data.edits);
   state.edits = withSections(state.data.live.edits);
   live.shared = entriesOf(state.edits);
   state.favorites = state.data.favorites;
