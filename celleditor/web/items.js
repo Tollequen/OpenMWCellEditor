@@ -305,9 +305,34 @@ function open(info, r) {
     i.disabled = b.disabled = !editable;
   };
 
+  const pickTemplate = (cur) => choose({
+    title: 'Choose an item to start from', current: cur, none: 'No template',
+    items: [...newItems(), ...listData.items].filter((o) => Object.values(KINDS).includes(o.type)) });
+  // the new item takes the template's values (all but its id), or the blank ones again
+  const useTemplate = async (id) => {
+    let from = info;
+    if (id) {
+      try { from = await itemInfo(id); } catch (err) { q('.it-note').textContent = err.message; return; }
+    }
+    for (const k of Object.keys(f)) delete f[k];
+    Object.assign(f, JSON.parse(JSON.stringify(id ? clean(from) : from)), { new: true, id: id ? idFrom(from.name || from.id) : '' });
+    if (id) f.template = from.id;
+    build();
+    view.show(f.model);
+    showIcon();
+  };
   const build = () => {
     form.innerHTML = '';
     if (isNew) {
+      const t = el('input');
+      t.type = 'text';
+      t.readOnly = true;
+      t.value = f.template || '';
+      t.placeholder = 'None: from scratch';
+      t.title = 'Start from an existing item\'s values';
+      const l = form.appendChild(el('label', 'opt'));
+      l.appendChild(el('span', null, 'Use template'));
+      l.appendChild(withChooser(t, pickTemplate, useTemplate));
       const s = choice('kindIndex', 'Kind', Object.values(KINDS));
       s.value = String(Object.keys(KINDS).indexOf(f.kind));
       s.addEventListener('change', () => {
