@@ -5156,9 +5156,9 @@ function setupStudio() {
   const keys = tool('tb-keys', 'keyboard', 'Controls: every key, and the key hints');
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
-  top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'), sep(), group($('undo'), $('redo')),
+  top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'),
              make('span', '', 'spacer'), $('mouselook'), sep(),
-             group(settings, $('fullscreen'), $('hide-panel')), $('save'));
+             group(settings, $('fullscreen'), $('hide-panel')), sep(), group($('undo'), $('redo')), $('save'));
   body.append(top);
 
   const pops = [];
