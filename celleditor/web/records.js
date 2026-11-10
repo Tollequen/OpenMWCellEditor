@@ -18,8 +18,8 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const KINDS = { WEAP: 'Weapon', ARMO: 'Armour', CLOT: 'Clothing', MISC: 'Misc item', BOOK: 'Book' };
 const ENCHANT_TYPES = ['Cast once', 'Cast when strikes', 'Cast when used', 'Constant effect'];
 const SPELL_TYPES = ['Spell', 'Ability', 'Blight', 'Disease', 'Curse', 'Power'];
-const NO_USE = 'Not placed or used by anything made here';
-const NO_USE_WHY = 'Nothing in this project places it, carries it or names it. A script or another mod could still use it.';
+const NO_USE = 'Unused';
+const NO_USE_WHY = 'Not placed in a cell and not referenced by another record in this project. Scripts may still use it.';
 
 // where the edits place an object id: [{key, cell}]
 function placed(id) {
@@ -41,14 +41,14 @@ const holds = (list, id) => (list || []).some((x) => low(Array.isArray(x) ? x[1]
 function namedBy(id, what) {
   const e = api.state.edits, out = [];
   if (what === 'item') {
-    for (const [k, n] of Object.entries(e.npcs || {})) if (holds(n.items, id)) out.push(`carried by ${nameOf(n, k)}`);
-    for (const [k, c] of Object.entries(e.containers || {})) if (holds(c.contents, id)) out.push(`inside ${nameOf(c, k)}`);
+    for (const [k, n] of Object.entries(e.npcs || {})) if (holds(n.items, id)) out.push(`Carried by ${nameOf(n, k)}`);
+    for (const [k, c] of Object.entries(e.containers || {})) if (holds(c.contents, id)) out.push(`In ${nameOf(c, k)}`);
     const locks = Object.values(e.props || {}).filter((p) => low(p.key) === id).length;
-    if (locks) out.push(`the key of ${plural(locks, 'lock', 'locks')}`);
+    if (locks) out.push(`Key for ${plural(locks, 'lock', 'locks')}`);
   } else if (what === 'enchant') {
-    for (const [k, it] of Object.entries(e.items || {})) if (low(it.enchant) === id) out.push(`on ${nameOf(it, k)}`);
+    for (const [k, it] of Object.entries(e.items || {})) if (low(it.enchant) === id) out.push(`Used by ${nameOf(it, k)}`);
   } else if (what === 'spell') {
-    for (const [k, n] of Object.entries(e.npcs || {})) if (holds(n.spells, id)) out.push(`known by ${nameOf(n, k)}`);
+    for (const [k, n] of Object.entries(e.npcs || {})) if (holds(n.spells, id)) out.push(`Known by ${nameOf(n, k)}`);
   }
   return out;
 }
@@ -57,7 +57,7 @@ function useOf(id, what) {
   const at = placed(id), by = namedBy(id, what);
   const cells = [...new Set(at.map((p) => p.cell))];
   const parts = [];
-  if (at.length) parts.push(`Placed ${at.length === 1 ? 'once' : at.length + ' times'} in ${cells.slice(0, 2).join(', ')}${cells.length > 2 ? ` and ${cells.length - 2} more` : ''}`);
+  if (at.length) parts.push(`Placed ${at.length === 1 ? '' : at.length + '× '}in ${cells.slice(0, 2).join(', ')}${cells.length > 2 ? ` and ${cells.length - 2} more` : ''}`);
   parts.push(...by);
   return { at, text: parts.join(' · '), unused: !parts.length };
 }
@@ -66,43 +66,56 @@ function tabs() {
   const e = api.state.edits;
   const rows = (sec, make) => Object.entries(e[sec] || {}).map(([k, v]) => make(k, v)).filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
-  const objectRow = (k, v, what, kind) => {
+  // Delete takes a new record out of the edits (only one nothing uses); Revert drops the changes to a game record
+  const remover = (sec, k, name, fresh, used, also = null) => ({
+    label: fresh ? 'Delete' : 'Revert',
+    blocked: fresh && used ? `In use (${used}). Remove those uses first.` : '',
+    title: fresh ? 'Remove it from the project' : 'Drop this project\'s changes to it',
+    run: () => {
+      api.change((edits) => { delete edits[sec][k]; also?.(edits); });
+      api.status(`${fresh ? 'Deleted' : 'Reverted'} ${name}. Undo brings ${fresh ? 'it' : 'the changes'} back.`);
+    },
+  });
+  const objectRow = (k, v, what, kind, sec, also) => {
     const fresh = !!v.new, u = useOf(low(v.id || k), what);
-    return { name: nameOf(v, k), id: v.id || k, tag: v.copy_of ? `Copy of ${v.copy_of}` : fresh ? 'New' : 'Changed', kind,
-             use: fresh || u.at.length ? u.text : 'One of the game\'s, changed here', unused: fresh && u.unused, at: u.at };
+    return { del: remover(sec, k, nameOf(v, k), fresh, u.text, also), name: nameOf(v, k), id: v.id || k, tag: v.copy_of ? `Copy of ${v.copy_of}` : fresh ? 'New' : 'Modified', kind,
+             use: u.text, unused: fresh && u.unused, at: u.at };
   };
   const magic = (kind, what, types) => rows('magic', (k, v) => {
     if (v.kind !== kind) return null;
     const u = useOf(low(v.id), what);
     return { name: v.name || v.id, id: v.id, tag: 'New', kind: types[v.type] || '', use: u.text, unused: u.unused, at: [],
+             del: remover('magic', k, v.name || v.id, true, u.text),
              note: (api.magicLines(v.id) || []).join(', ') };
   });
   return [
-    { id: 'items', title: 'Items', empty: 'No items made or changed yet.', add: ['New item…', api.newItem],
-      rows: rows('items', (k, v) => Object.assign(objectRow(k, v, 'item', KINDS[v.kind] || 'Item'),
+    { id: 'items', title: 'Items', empty: 'No items yet.', add: ['New item…', api.newItem],
+      rows: rows('items', (k, v) => Object.assign(objectRow(k, v, 'item', KINDS[v.kind] || 'Item', 'items'),
                                                   v.new ? { edit: () => api.editItem(v.id) } : {})) },
-    { id: 'npcs', title: 'NPCs', empty: 'No NPCs made or changed yet.', add: ['New NPC…', api.newNpc, true],
-      rows: rows('npcs', (k, v) => Object.assign(objectRow(k, v, 'npc', [v.race, v.class].filter(Boolean).join(' ')),
+    { id: 'npcs', title: 'NPCs', empty: 'No NPCs yet.', add: ['New NPC…', api.newNpc, true],
+      rows: rows('npcs', (k, v) => Object.assign(objectRow(k, v, 'npc', [v.race, v.class].filter(Boolean).join(' '), 'npcs', (edits) => {
+        for (const [d, r] of Object.entries(edits.dialogue || {})) if (r.new && low(r.actor) === k) delete edits.dialogue[d];
+      }),
                                                  { name: v.name || api.npcName(k), edit: () => api.editNpc(v.id || k), leave: true })) },
-    { id: 'enchants', title: 'Enchantments', empty: 'No enchantments made yet.',
+    { id: 'enchants', title: 'Enchantments', empty: 'No enchantments yet.',
       add: ['New enchantment…', () => api.newMagic('ENCH')], rows: magic('ENCH', 'enchant', ENCHANT_TYPES) },
-    { id: 'spells', title: 'Spells', empty: 'No spells made yet.',
+    { id: 'spells', title: 'Spells', empty: 'No spells yet.',
       add: ['New spell…', () => api.newMagic('SPEL')], rows: magic('SPEL', 'spell', SPELL_TYPES) },
-    { id: 'containers', title: 'Containers', empty: 'No container\'s contents changed yet. Select a chest or sack and choose Contents.',
-      rows: rows('containers', (k, v) => Object.assign(objectRow(k, v, 'container', plural((v.contents || []).length, 'kind of item', 'kinds of items') + ' inside'))) },
-    { id: 'cells', title: 'Cells', empty: 'No cells made yet.', add: ['New cell…', api.newCell, true],
+    { id: 'containers', title: 'Containers', empty: 'No modified containers. To change one, select it in a cell and choose Contents.',
+      rows: rows('containers', (k, v) => Object.assign(objectRow(k, v, 'container', plural((v.contents || []).length, 'item type', 'item types'), 'containers'))) },
+    { id: 'cells', title: 'Cells', empty: 'No new cells yet.', add: ['New cell…', api.newCell, true],
       rows: rows('cells', (k, v) => {
         if (!v.new) return null;
         const objects = (e.added || []).filter((a) => a.cell === v.name && !(e.deleted || []).includes('added|' + a.uid)).length;
         const doors = Object.values(e.doors || {}).filter((d) => d.cell === v.name).length;
         return { name: v.name, id: '', tag: 'New', kind: 'Interior',
-                 use: `${plural(objects, 'object', 'objects')} · ${doors ? plural(doors, 'door leads', 'doors lead') + ' here' : 'no door leads here yet'}`,
-                 unused: !doors, why: 'The player can\'t get in until a door\'s destination is set to this cell (or a script moves them).',
+                 use: `${plural(objects, 'object', 'objects')} · ${doors ? plural(doors, 'door leads', 'doors lead') + ' here' : 'no doors lead here'}`,
+                 unused: !doors, why: 'No door has this cell as its destination, so the player can\'t reach it without a script.',
                  at: [], edit: () => api.editCell(v.name), go: () => api.goCell(v.name) };
       }) },
-    { id: 'dialogue', title: 'Dialogue', empty: 'No responses written or changed yet. They\'re on an NPC\'s Dialogue tab.',
+    { id: 'dialogue', title: 'Dialogue', empty: 'No dialogue yet. Add responses on an NPC\'s Dialogue tab.',
       rows: rows('dialogue', (k, v) => ({
-        name: v.topic || k.split('|')[0], id: '', tag: v.deleted ? 'Deleted' : v.new ? 'New' : 'Changed', kind: v.actor ? `said by ${api.npcName(v.actor)}` : '',
+        name: v.topic || k.split('|')[0], id: '', tag: v.deleted ? 'Deleted' : v.new ? 'New' : 'Modified', kind: v.actor ? `Speaker: ${api.npcName(v.actor)}` : '',
         use: v.text ? `“${v.text.length > 110 ? v.text.slice(0, 110) + '…' : v.text}”` : '', unused: false, at: [],
         ...(v.actor ? { edit: () => api.editNpc(v.actor), leave: true } : {}) })) },
   ];
@@ -114,7 +127,7 @@ function open(tab = null) {
   if (document.querySelector('.records-dialog')) return;
   const bg = el('div', 'dialog-bg');
   bg.innerHTML = `<div class="dialog records-dialog"><div class="rc-head"><h3>Records</h3><span class="spacer"></span><button class="rc-close">Close</button></div>
-    <p class="dim rc-sub">What this project made or changed, apart from the objects standing in its cells. Unsaved ones are here too.</p>
+    <p class="dim rc-sub">Records this project adds or modifies, including unsaved changes.</p>
     <div class="npc-tabs rc-tabs" role="tablist"></div><div class="rc-list"></div>
     <div class="bar"><span class="npc-hint rc-note"></span><span class="spacer"></span><button class="primary rc-add"></button></div></div>`;
   document.body.appendChild(bg);
@@ -163,9 +176,16 @@ function open(tab = null) {
       }
       if (r.go) acts.appendChild(el('button', null, 'Go there')).addEventListener('click', leaving(r.go));
       if (r.edit) acts.appendChild(el('button', null, 'Edit…')).addEventListener('click', r.leave ? leaving(r.edit) : r.edit);
+      if (r.del) {
+        const b = acts.appendChild(el('button', r.del.label === 'Delete' ? 'rc-del' : null, r.del.label));
+        b.disabled = !!r.del.blocked;
+        b.title = r.del.blocked || r.del.title;
+        b.addEventListener('click', () => { r.del.run(); draw(); });
+      }
     }
     const unused = t.rows.filter((r) => r.unused).length;
-    q('.rc-note').textContent = unused ? `${unused} not used yet (in yellow). A script could still use them.` : '';
+    q('.rc-note').textContent = !unused ? '' : t.id === 'cells' ? `${unused} with no door leading to ${unused === 1 ? 'it' : 'them'}.`
+      : `${unused} unused. Scripts may still use ${unused === 1 ? 'it' : 'them'}.`;
     const add = q('.rc-add');
     add.style.display = t.add ? '' : 'none';
     if (t.add) {

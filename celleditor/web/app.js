@@ -4695,7 +4695,16 @@ $('reset').addEventListener('click', resetSelected);
 // --- Records ---------------------------------------------------------------------------
 
 const recordsWin = setupRecords({
-  state,
+  state, status,
+  change: (fn) => {
+    const before = entriesOf(state.edits);
+    fn(state.edits);
+    const diff = diffOf(before, entriesOf(state.edits));
+    if (diff.length) state.undo.push({ diff });
+    updatePanel();
+    updateDirty();
+    refreshCell();
+  },
   npcName: (id) => { try { return npcEditor.nameOf(id); } catch (err) { return id; } },
   editNpc: openNpcs,
   newNpc: () => $('add-npc').click(),
@@ -5112,7 +5121,7 @@ function richPanel() {
   for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
     ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item…', 'Your own weapon, armour, book…'],
     ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid'],
-    ['records', 'Records…', 'The items, NPCs, magic and cells you made']]) {
+    ['records', 'Records…', 'Items, NPCs, magic and cells in this project']]) {
     const b = $(id);
     for (const n of [...b.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
     const lab = document.createElement('span'), small = document.createElement('small');
