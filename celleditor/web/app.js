@@ -5144,7 +5144,7 @@ function setupStudio() {
   body.classList.add('studio');
 
   const settings = tool('tb-settings', 'sliders', 'Settings: steps, speeds, grid, layout');
-  const keys = tool('tb-keys', 'keyboard', 'Every control (the quick guide: ?)');
+  const keys = tool('tb-keys', 'keyboard', 'Controls: every key, and the key hints along the bottom');
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
   top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'), sep(), group($('undo'), $('redo')),
@@ -5189,7 +5189,7 @@ function setupStudio() {
   $('obj-history').after(close);
 
   const bar = make('div', 'hintbar');
-  const hide = tool('', 'x', 'Hide the key hints (Settings brings them back)');
+  const hide = tool('', 'x', 'Hide the key hints (the keyboard button at the top right brings them back)');
   hide.classList.add('ghost');
   bar.append(make('span', '', 'rest'), hide);
   body.append(bar);
@@ -5199,7 +5199,8 @@ function setupStudio() {
     try { localStorage.setItem('ce-hints', on ? '1' : '0'); } catch (err) { /* private mode */ }
   };
   setHints(stored('ce-hints') !== '0');
-  hide.addEventListener('click', () => setHints(false));
+  hide.addEventListener('click', () => { setHints(false); status('Key hints hidden. The keyboard button at the top right brings them back.'); });
+  $('controls-help').querySelector('.body').prepend($('hints-row'));
   $('hints').addEventListener('change', () => setHints($('hints').checked));
   new MutationObserver(updateHints).observe(body, { attributes: true, attributeFilter: ['class'] });
   for (const id of ['place-banner', 'dest-banner']) {
@@ -5212,11 +5213,18 @@ function setupStudio() {
 function updateHints() {
   const bar = $('hintbar')?.querySelector('.rest');
   if (!bar) return;
-  const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = mac ? 'Cmd' : 'Ctrl', alt = mac ? 'Option' : 'Alt';
+  const isKey = (x) => /^([A-Z?]|Esc|Tab|Del|Cmd|Ctrl|Shift|PgUp|PgDn)$/.test(x);
   const n = state.selection.length;
   const [what, hints] = $('place-banner').classList.contains('open') ? ['Placing', [['Click', 'put it there'], ['Right-drag', 'look around'], ['Esc', 'cancel']]]
     : $('dest-banner').classList.contains('open') ? ['Door destination', [['W A S D', 'fly to where the player arrives'], ['Right-drag', 'face the way they should']]]
-    : document.body.classList.contains('building') ? ['Room builder', [['Click, drag', 'place'], ['Z X', 'turn'], ['Esc', 'done']]]
+    : document.body.classList.contains('mouse-look') ? ['Fly mode', [['W A S D', 'fly'], ['Q E', 'down, up'], ['Shift', 'faster'],
+      ['Click', 'select at the crosshair'], ['Right-click', 'menu'], ['Arrows', 'move the object'], ['Z X', 'rotate'], ['G', 'drop'],
+      ['Del', 'delete'], [mod + ' Z', 'undo'], ['Tab', 'leave fly mode']]]
+    : document.body.classList.contains('building') ? ['Room builder', [['Click, drag', 'place'], [alt + ' click', 'take away'],
+      ['Z X', 'turn'], ['PgUp PgDn', 'raise, lower'], ['Wheel', 'next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
+      [mod + ' Z', 'undo'], ['Esc', 'done']]]
     : n ? [n > 1 ? `${n} selected` : 'Selected', [['Drag the arrows', 'move'], ['T R Y', 'move, rotate, scale'], ['G', 'drop onto the surface'],
       ['B', 'attach'], [mod + ' D', 'duplicate'], ...(n > 1 ? [[mod + ' G', 'group']] : [[mod + ' click', 'select more']]), ['Del', 'delete'],
       ['F', 'focus'], ['Right-click', 'more'], ['Esc', 'deselect']]]
@@ -5226,7 +5234,7 @@ function updateHints() {
   if (bar.dataset.key === key) return;
   bar.dataset.key = key;
   bar.innerHTML = (what ? `<span class="what"></span>` : '')
-    + hints.map(([k, v]) => `<span class="h">${/^[A-Z?]( [A-Z])*$|^(Esc|Tab|Del|Cmd|Ctrl)( [A-Z])?$/.test(k)
+    + hints.map(([k, v]) => `<span class="h">${k.split(' ').every(isKey)
       ? k.split(' ').map((x) => `<kbd>${x}</kbd>`).join('') : `<b>${k}</b>`}${v}</span>`).join('');
   if (what) bar.querySelector('.what').textContent = what;
 }

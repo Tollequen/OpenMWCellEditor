@@ -92,7 +92,10 @@ body.studio.has-sel:not(.building) #inspector { display: block; }
 #hintbar { position: fixed; left: var(--vl); right: 0; bottom: 0; height: 30px; box-sizing: border-box; z-index: 2; display: none;
            align-items: center; gap: 16px; padding: 0 6px 0 12px; color: #d6d6da; font-size: 12px; white-space: nowrap; overflow: hidden;
            background: linear-gradient(transparent, rgba(0, 0, 0, .6)); text-shadow: 0 1px 2px #000; pointer-events: none; }
-body.studio.hints:not(.mouse-look):not(.pad) #hintbar { display: flex; }
+body.studio.hints:not(.pad) #hintbar { display: flex; }
+/* with the hints on, they stand in for the modes' own key boxes */
+body.studio.hints #rb-float, body.studio.hints #look-keys { display: none !important; }
+.tpop #hints-row { margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
 #hintbar .h { display: inline-flex; align-items: center; gap: 5px; flex: none; }
 #hintbar .h b, #hintbar .what { font-weight: 600; color: #fff; flex: none; }
 #hintbar kbd { font-size: 10.5px; padding: 1px 4px; text-shadow: none; }
