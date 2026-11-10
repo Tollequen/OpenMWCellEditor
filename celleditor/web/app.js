@@ -726,7 +726,7 @@ const isOwned = (p) => !!(p && (p.owner || p.faction));
 // what a newly placed object of a catalog type can have (the server says it for loaded ones)
 function typeFlags(type) {
   return { props: {}, item: ['Weapon', 'Armor', 'Clothing', 'Misc', 'Book'].includes(type), container: type === 'Container',
-           lockable: type === 'Container' || type === 'Door', ownable: !['Static', 'NPC', 'Creature'].includes(type) };
+           lockable: type === 'Container' || type === 'Door', ownable: !['Static', 'NPC', 'Creature', 'Leveled creature'].includes(type) };
 }
 
 function propsText(p, lockable, names = {}) {
@@ -2004,12 +2004,12 @@ async function getCatalog() {
 const OFFICIAL_FILES = ['morrowind.esm', 'tribunal.esm', 'bloodmoon.esm'];
 const OBJECT_CATEGORIES = ['Furniture', 'Containers', 'Lights', 'Clutter', 'Books', 'Signs and banners', 'Plants',
                            'Ingredients', 'Potions', 'Apparatus', 'Clothing', 'Armor', 'Weapons', 'Tools', 'Doors',
-                           'Interior pieces', 'Exterior pieces', 'Rocks and terrain', 'Activators', 'Keys', 'NPCs',
+                           'Interior pieces', 'Exterior pieces', 'Rocks and terrain', 'Activators', 'Keys', 'NPCs', 'Creatures',
                            'Other'];
 const TYPE_CATEGORY = { Container: 'Containers', Light: 'Lights', Book: 'Books', Ingredient: 'Ingredients',
                         Potion: 'Potions', Apparatus: 'Apparatus', Clothing: 'Clothing', Armor: 'Armor',
                         Weapon: 'Weapons', Lockpick: 'Tools', Probe: 'Tools', Repair: 'Tools', Door: 'Doors',
-                        Activator: 'Activators', NPC: 'NPCs' };
+                        Activator: 'Activators', NPC: 'NPCs', Creature: 'Creatures', 'Leveled creature': 'Creatures' };
 
 function category(o) {
   const id = o.id.toLowerCase();

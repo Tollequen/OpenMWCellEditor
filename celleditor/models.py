@@ -11,8 +11,8 @@ MODEL_TYPES = ("STAT", "CONT", "ACTI", "DOOR", "LIGH", "MISC", "FURN", "BOOK", "
 CATALOG_TYPES = {"STAT": "Static", "CONT": "Container", "ACTI": "Activator", "DOOR": "Door", "LIGH": "Light",
                  "MISC": "Misc", "BOOK": "Book", "CLOT": "Clothing", "INGR": "Ingredient", "APPA": "Apparatus",
                  "PROB": "Probe", "LOCK": "Lockpick", "REPA": "Repair", "ALCH": "Potion", "ARMO": "Armor",
-                 "WEAP": "Weapon", "NPC_": "NPC"}
-VERSION = 5
+                 "WEAP": "Weapon", "NPC_": "NPC", "CREA": "Creature"}
+VERSION = 6
 
 
 def cache_dir():
@@ -27,8 +27,13 @@ def cache_dir():
 
 
 def _scan(path):
-    models, catalog, lights = {}, [], {}
+    models, catalog, lights, leveled = {}, [], {}, {}
     for tag, _, subs in esm_records(path):
+        if tag == "LEVC" and subs and subs[0][0] == "NAME":
+            # a leveled creature list: shown as its first creature (the game picks one by the player's level)
+            first = next((cstr(v) for s, v in subs if s == "CNAM"), "")
+            leveled[cstr(subs[0][1])] = first
+            continue
         if tag not in MODEL_TYPES or not subs or subs[0][0] != "NAME":
             continue
         oid = cstr(subs[0][1])
@@ -46,14 +51,14 @@ def _scan(path):
             catalog.append({"id": oid, "type": CATALOG_TYPES[tag], "name": cstr(d.get("FNAM", b"")),
                             "mesh": "" if tag == "NPC_" else mesh,       # an NPC's MODL is an animation, not its mesh
                             "file": os.path.basename(path)})
-    return models, catalog, lights
+    return models, catalog, lights, leveled
 
 
 def load(masters):
     """(models, catalog, origins, lights) of the content files, later ones overriding earlier ones.
 
     lights: {id (lower case): [radius, red, green, blue, flags]}."""
-    models, catalog, origins, lights = {}, {}, {}, {}
+    models, catalog, origins, lights, leveled = {}, {}, {}, {}, {}
     for path in masters:
         st = os.stat(path)
         key = "%s-%d-%d" % (os.path.basename(path).lower(), st.st_size, int(st.st_mtime))
@@ -67,8 +72,8 @@ def load(masters):
         except (OSError, ValueError):
             pass
         if data is None:
-            m, c, li = _scan(path)
-            data = {"version": VERSION, "models": m, "catalog": c, "lights": li}
+            m, c, li, lv = _scan(path)
+            data = {"version": VERSION, "models": m, "catalog": c, "lights": li, "leveled": lv}
             try:
                 os.makedirs(cache_dir(), exist_ok=True)
                 with open(cache + ".tmp", "w") as f:
@@ -83,4 +88,18 @@ def load(masters):
         for o in data["catalog"]:
             catalog[o["id"].lower()] = dict(o, file=origins.get(o["id"].lower(), name))
         lights.update(data["lights"])
+        for k, first in data["leveled"].items():
+            leveled[k.lower()] = (k, first, name)
+            origins.setdefault(k.lower(), name)
+    # leveled lists of leveled lists: follow the first entries down to a creature
+    for k, (oid, first, name) in leveled.items():
+        seen = {k}
+        while first.lower() in leveled and first.lower() not in seen:
+            seen.add(first.lower())
+            first = leveled[first.lower()][1]
+        m = models.get(first.lower())
+        if m and m[1]:
+            models[k] = ("LEVC", m[1])
+            catalog[k] = {"id": oid, "type": "Leveled creature", "name": "", "mesh": m[1], "file": origins.get(k, name),
+                          "first": first}
     return models, sorted(catalog.values(), key=lambda o: o["id"].lower()), origins, lights

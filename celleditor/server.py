@@ -547,7 +547,8 @@ def _entry(r, clones, index):
             "light": light_info(src, index) if m and m[0] == "LIGH" else None,
             "props": writer.props_of(r), "lockable": bool(m and m[0] in ("DOOR", "CONT")),
             "container": bool(m and m[0] == "CONT"), "item": bool(m and m[0] in items.KINDS),
-            "ownable": not (m and m[0] in ("NPC_", "CREA", "STAT"))}
+            "ownable": not (m and m[0] in ("NPC_", "CREA", "LEVC", "STAT")),
+            "leveled": bool(m and m[0] == "LEVC")}
 
 
 # --- Lighting -------------------------------------------------------------------------
