@@ -2795,7 +2795,7 @@ $('place-cancel').addEventListener('click', () => stopPlacing());
 // and Page Down change the height by 64, a short right-click takes away a piece added in this cell.
 
 const painter = { on: false, style: '', all: [], pieces: [], at: 0, yaw: 0, level: 0, ghost: null, ghostMesh: '',
-                  stroke: null, wheel: 0, point: null, token: 0, thumbObserver: null };
+                  stroke: null, wheel: 0, point: null, token: 0, thumbObserver: null, lift: 0 };
 const STYLE_ALIASES = { lava: 'lavacave', mold: 'moldcave', mud: 'mudcave', py: 'pycave', bone: 'bonecave',
                         strong: 'stronghold', strongruin: 'stronghold', r: 'redoran', h: 'hlaalu', v: 'vivec',
                         impsmall: 'imperial', imp: 'imperial', common: 'c', dwe: 'dwrv' };
@@ -2856,7 +2856,25 @@ async function openPainter(at = null) {
   }
   $('pt-search').value = '';
   filterPainter();
+  liftPalette();
   status('Room painter: click to place, Z and X turn, Page Up and Down change the height, the wheel picks the piece.');
+}
+
+// how high the palette's pieces are lifted so their floors stand on the grid: one height for the whole palette
+// (its pieces share the game's heights, so they keep fitting each other), from a room's middle or corner piece
+async function liftPalette() {
+  const style = painter.style;
+  const ref = painter.pieces.find((o) => /room_?(center|middle)|_center|floor/i.test(o.id))
+    || painter.pieces.find((o) => /corner|side/i.test(o.id)) || painter.pieces[0];
+  painter.lift = 0;
+  if (!ref) return;
+  const parts = await meshParts(ref.mesh);
+  if (painter.style !== style) return;
+  const box = new THREE.Box3();
+  for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
+  painter.lift = Number.isFinite(box.min.z) ? -Math.round(box.min.z) : 0;
+  if (painter.point) painter.point[2] = painter.level + painter.lift;
+  moveGhost();
 }
 
 function closePainter() {
@@ -2962,7 +2980,7 @@ function paintPoint(x, y) {
   raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
   const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -painter.level), new THREE.Vector3());
   if (!p || p.distanceTo(camera.position) > 20000) return null;
-  return [toStep(p.x, grid.step), toStep(p.y, grid.step), painter.level];
+  return [toStep(p.x, grid.step), toStep(p.y, grid.step), painter.level + painter.lift];
 }
 
 function paintHover(e) {
@@ -3032,7 +3050,7 @@ function paintErase(x, y) {
 function paintTurn(sign) { painter.yaw = wrapAngle(painter.yaw + sign * Math.PI / 2); paintInfo(); moveGhost(); }
 function paintLevel(sign) {
   painter.level += sign * GRID_Z;
-  if (painter.point) painter.point[2] = painter.level;
+  if (painter.point) painter.point[2] = painter.level + painter.lift;
   paintInfo();
   moveGhost();
   levelGrid(true);
