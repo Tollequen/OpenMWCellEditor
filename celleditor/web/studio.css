@@ -1,0 +1,92 @@
+/* The desktop layout (body.studio): a toolbar on top, a rail to add things, an inspector for the selection */
+body.studio { --sb-top: 46px; --sb-rail: 216px; --sb-hint: 28px; --vl: var(--sb-rail); --vt: var(--sb-top); --vb: var(--sb-hint);
+              --cx: calc(var(--vl) + (100% - var(--vl)) / 2); --cy: calc(var(--vt) + (100% - var(--vt) - var(--vb)) / 2); }
+body.studio.building { --sb-rail: 292px; }
+body.studio.panel-hidden { --vl: 0px; }
+body.studio.mouse-look { --vl: 0px; --vt: 0px; --vb: 0px; }
+body.studio #view { left: var(--vl); top: var(--vt); width: calc(100% - var(--vl)); height: calc(100% - var(--vt) - var(--vb)); }
+body.studio #crosshair { left: var(--cx); top: var(--cy); }
+body.studio #pad-aim { left: var(--cx); top: calc(var(--cy) + 12px); }
+body.studio #pad-menu { left: var(--cx); top: var(--cy); }
+body.studio #pad-hints, body.studio #rb-float { top: calc(var(--vt) + 12px); }
+body.studio .banner, body.studio #dest-banner { top: calc(var(--vt) + 10px); left: var(--cx); }
+body.studio #toast { left: var(--cx); bottom: calc(var(--vb) + 14px); }
+body.studio #loading { left: calc(var(--vl) + 12px); bottom: calc(var(--vb) + 12px); }
+body.studio #quick-acts, body.studio #show-panel, body.studio label.opt:has(#dock) { display: none !important; }
+body.studio.mouse-look #topbar, body.studio.mouse-look #hintbar, body.studio.mouse-look #inspector { display: none; }
+
+/* Toolbar */
+#topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--sb-top); box-sizing: border-box; z-index: 4; display: flex;
+          align-items: center; gap: 6px; padding: 0 10px 0 6px; background: var(--panel); border-bottom: 1px solid var(--line); }
+#topbar button { height: 30px; flex: none; }
+#topbar button.icon { width: 30px; }
+#topbar .tg { display: flex; align-items: center; gap: 4px; flex: none; position: relative; }
+#topbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; flex: none; }
+#topbar .spacer { flex: 1; min-width: 0; }
+#topbar .menu-btn { flex: none; max-width: 190px; }
+#topbar .menu { left: 0; top: calc(100% + 6px); }
+#topbar .cell-row { flex: 0 1 270px; min-width: 150px; }
+#topbar #others { margin: 0; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+body.studio #n-modes { display: flex; margin: 0; flex: none; }
+body.studio #n-modes button { padding: 0 12px; height: 28px; }
+body.studio #qa-snaps { display: flex !important; padding: 0; border: none; }
+#topbar #qa-snaps button { color: var(--dim); }
+#topbar #qa-snaps button.on { color: var(--text); }
+#topbar #mouselook { position: static; background: var(--panel); }
+body.studio.panel-hidden #hide-panel { color: var(--text); background: var(--accent-soft); }
+body.studio #save { padding: 4px 16px 4px 12px; font-weight: 600; }
+@media (max-width: 1240px) {
+  #topbar :not(#save) > .n-lbl { display: none !important; }
+  body.studio #n-modes button { padding: 0 9px; }
+  #topbar #qa-snaps button { font-size: 0; gap: 0; width: 30px; padding: 4px; }
+}
+@media (max-width: 940px) {
+  #topbar #mouselook { font-size: 0; gap: 0; width: 30px; padding: 4px; }
+  #topbar #mouselook kbd { display: none; }
+  #topbar .menu-btn { max-width: 120px; }
+}
+
+/* Toolbar windows: settings, keys */
+.tpop { display: none; position: fixed; z-index: 7; width: 300px; max-height: calc(100% - var(--sb-top) - 20px); overflow-y: auto;
+        box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow);
+        padding: 10px 12px; }
+.tpop.open { display: block; }
+.tpop.wide { width: 440px; }
+.tpop h3 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; }
+.tpop details.fold { border: none; }
+.tpop details.fold > summary { display: none; }
+.tpop details.fold > .body { padding: 0; }
+
+/* Rail: adding, the view's switches, the project */
+body.studio #panel { top: var(--sb-top); left: 0; bottom: var(--sb-hint); width: var(--sb-rail); height: auto; max-height: none;
+                     border: none; border-right: 1px solid var(--line); border-radius: 0; box-shadow: none; background: var(--panel); }
+body.studio #panel > .phead, body.studio #n-bar, body.studio #sec-cell { display: none; }
+body.studio #n-add-pair { grid-template-columns: 1fr; }
+body.studio #n-add-pair button, body.studio #paint-rooms { height: auto; min-height: 44px; width: 100%; justify-content: flex-start; gap: 10px;
+                     padding: 6px 10px; text-align: left; font-weight: 600; white-space: normal; line-height: 1.25; }
+body.studio #n-add .pair.one, body.studio #n-add > #paint-rooms { margin-top: 6px; }
+body.studio #n-add .lab { display: flex; flex-direction: column; min-width: 0; }
+body.studio #n-add .lab small { font-weight: 400; font-size: 11.5px; color: var(--dim); }
+body.studio details.fold summary { text-transform: uppercase; letter-spacing: .05em; font-size: 11px; font-weight: 600; }
+
+/* Inspector: the selection */
+#inspector { position: fixed; right: 10px; top: calc(var(--vt) + 10px); width: 292px; max-height: calc(100% - var(--vt) - var(--vb) - 20px);
+             overflow-y: auto; box-sizing: border-box; z-index: 3; display: none; background: var(--float); border: 1px solid var(--line);
+             border-radius: 6px; box-shadow: var(--shadow); }
+body.studio.has-sel:not(.building):not(.panel-hidden) #inspector { display: block; }
+#inspector .psec { border: none; }
+#inspector #npc-row, #inspector #own-row, #inspector #door-row { margin: 0 0 8px; }
+#inspector #own-row .row, #inspector #door-row .row { margin-top: 4px; }
+#inspector #own-row button, #inspector #door-row button, #inspector #npc-row button { flex: 1 1 auto; height: 32px; }
+#inspector #own-info:empty, #inspector #door-info:empty { display: none; }
+#inspector #own-info, #inspector #door-info { margin: 0 0 4px; }
+#inspector #insp-close { margin-left: 2px; }
+
+/* What the mouse and keys do now */
+#hintbar { position: fixed; left: 0; right: 0; bottom: 0; height: var(--sb-hint); box-sizing: border-box; z-index: 4; display: flex;
+           align-items: center; gap: 16px; padding: 0 12px; background: var(--panel); border-top: 1px solid var(--line);
+           color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; }
+#hintbar .h { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+#hintbar .h b { font-weight: 600; color: var(--text); }
+#hintbar kbd { font-size: 10.5px; padding: 1px 4px; }
+#hintbar .what { color: var(--text); font-weight: 600; flex: none; }

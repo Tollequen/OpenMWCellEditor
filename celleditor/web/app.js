@@ -1303,6 +1303,8 @@ function updateTouchBar() {
 }
 
 function updatePanel() {
+  document.body.classList.toggle('has-sel', state.selection.length > 0);
+  updateHints();
   updateTouchBar();
   updateQuickActs();
   updateButtons();
@@ -4933,8 +4935,14 @@ function setDock(v) {
   try { localStorage.setItem('ce-dock', $('dock').value); } catch (err) { /* private mode */ }
   resize();
 }
-setDock(stored('ce-dock') || 'float');
+const STUDIO = !TOUCH && stored('ce-layout') !== 'panels';
+if (!STUDIO) setDock(stored('ce-dock') || 'float');
 setLayout('new');
+$('layout').value = STUDIO ? 'studio' : 'panels';
+$('layout').addEventListener('change', () => {
+  try { localStorage.setItem('ce-layout', $('layout').value); } catch (err) { /* private mode */ }
+  location.reload();
+});
 $('dock').addEventListener('change', () => { setDock($('dock').value); $('dock').blur(); });
 
 // --- Floating sections -------------------------------------------------------------
@@ -5068,7 +5076,115 @@ function setupFloating() {
     saveFloating();
   });
 }
-setupFloating();
+if (STUDIO) setupStudio(); else setupFloating();
+
+// --- Studio layout -----------------------------------------------------------------
+// Desktop: the panel's controls moved into a toolbar (project, cell, undo, gizmo, snapping, save), a rail (adding,
+// view, project), an inspector that shows with a selection, and a line of what the mouse and keys do now.
+
+function setupStudio() {
+  const body = document.body;
+  const make = (tag, id, cls) => {
+    const e = document.createElement(tag);
+    if (id) e.id = id;
+    if (cls) e.className = cls;
+    return e;
+  };
+  const group = (...kids) => { const g = make('span', '', 'tg'); g.append(...kids); return g; };
+  const sep = () => make('span', '', 'sep');
+  const tool = (id, name, title) => {
+    const b = make('button', id, 'icon');
+    b.title = title;
+    b.innerHTML = icon(name);
+    return b;
+  };
+  body.classList.add('studio');
+
+  const settings = tool('tb-settings', 'sliders', 'Settings: steps, speeds, grid, layout');
+  const keys = tool('tb-keys', 'keyboard', 'Every control (the quick guide: ?)');
+  $('hide-panel').title = 'Hide or show the side panels (P)';
+  const top = make('div', 'topbar');
+  top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'), sep(), group($('undo'), $('redo')), sep(),
+             $('n-modes'), $('qa-snaps'), make('span', '', 'spacer'), $('mouselook'), sep(),
+             group(settings, keys, $('fullscreen'), $('hide-panel')), $('save'));
+  body.append(top);
+
+  const pops = [];
+  const pop = (btn, title, content, wide) => {
+    const p = make('div', '', 'tpop' + (wide ? ' wide' : ''));
+    const h = make('h3');
+    h.textContent = title;
+    content.open = true;
+    p.append(h, content);
+    body.append(p);
+    pops.push([btn, p]);
+    btn.addEventListener('click', () => {
+      const open = !p.classList.contains('open');
+      for (const [, q] of pops) q.classList.remove('open');
+      p.classList.toggle('open', open);
+      const r = btn.getBoundingClientRect();
+      p.style.top = (r.bottom + 8) + 'px';
+      p.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    });
+  };
+  pop(settings, 'Settings', $('settings'));
+  pop(keys, 'Controls', $('controls-help'), true);
+  const closePops = () => { for (const [, p] of pops) p.classList.remove('open'); };
+  window.addEventListener('pointerdown', (e) => { if (!e.target.closest('.tpop, #tb-settings, #tb-keys')) closePops(); }, true);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePops(); });
+  $('guide-btn').addEventListener('click', closePops);
+
+  for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
+    ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item…', 'Your own weapon, armour, book…'],
+    ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid']]) {
+    const b = $(id);
+    for (const n of [...b.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
+    const lab = make('span', '', 'lab');
+    const small = make('small');
+    small.textContent = what;
+    lab.append(name, small);
+    b.append(lab);
+  }
+
+  const insp = make('div', 'inspector');
+  insp.append($('sec-selected'));
+  body.append(insp);
+  $('sel-edit').before($('own-row'), $('door-row'));
+  const close = tool('insp-close', 'x', 'Deselect (Esc)');
+  close.classList.add('ghost');
+  close.addEventListener('click', () => select(null));
+  $('obj-history').after(close);
+
+  body.append(make('div', 'hintbar'));
+  new MutationObserver(updateHints).observe(body, { attributes: true, attributeFilter: ['class'] });
+  for (const id of ['place-banner', 'dest-banner']) {
+    new MutationObserver(updateHints).observe($(id), { attributes: true, attributeFilter: ['class'] });
+  }
+  new ResizeObserver(resize).observe(canvas);
+  updateHints();
+}
+
+function updateHints() {
+  const bar = $('hintbar');
+  if (!bar) return;
+  const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
+  const n = state.selection.length;
+  const [what, hints] = $('place-banner').classList.contains('open') ? ['Placing', [['Click', 'put it there'], ['Right-drag', 'look around'], ['Esc', 'cancel']]]
+    : $('dest-banner').classList.contains('open') ? ['Door destination', [['W A S D', 'fly to where the player arrives'], ['Right-drag', 'face the way they should']]]
+    : document.body.classList.contains('building') ? ['Room builder', [['Click, drag', 'place'], ['Z X', 'turn'], ['Esc', 'done']]]
+    : n ? [n > 1 ? `${n} selected` : 'Selected', [['Drag the arrows', 'move'], ['T R Y', 'move, rotate, scale'], ['G', 'drop onto the surface'],
+      ['B', 'attach'], [mod + ' D', 'duplicate'], ...(n > 1 ? [[mod + ' G', 'group']] : [[mod + ' click', 'select more']]), ['Del', 'delete'],
+      ['F', 'focus'], ['Right-click', 'more'], ['Esc', 'deselect']]]
+    : ['', [['Click', 'select'], ['Right-click', 'add here, menu'], ['Right-drag', 'look around'], ['W A S D', 'fly'], ['Q E', 'down, up'],
+      ['Scroll', 'forward, back'], ['Tab', 'fly mode'], ['L', 'lock walls'], ['?', 'guide']]];
+  const key = what + '|' + hints.length;
+  if (bar.dataset.key === key) return;
+  bar.dataset.key = key;
+  bar.innerHTML = (what ? `<span class="what"></span>` : '')
+    + hints.map(([k, v]) => `<span class="h">${/^[A-Z?]( [A-Z])*$|^(Esc|Tab|Del|Cmd|Ctrl)( [A-Z])?$/.test(k)
+      ? k.split(' ').map((x) => `<kbd>${x}</kbd>`).join('') : `<b>${k}</b>`}${v}</span>`).join('');
+  if (what) bar.querySelector('.what').textContent = what;
+}
 
 function showGuide() {
   if (document.querySelector('.dialog-bg')) return;
@@ -5105,6 +5221,7 @@ function showGuide() {
     d.querySelector('ul').appendChild(li);
   }
   d.querySelector('.foot').textContent = TOUCH ? 'All controls: Controls, in the panel.'
+    : STUDIO ? 'This guide: press ?. Every control: the keyboard button at the top right.'
     : 'All controls: Controls, at the bottom of the panel (or press ?).';
   bg.appendChild(d);
   document.body.appendChild(bg);

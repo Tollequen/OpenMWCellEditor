@@ -741,6 +741,7 @@
   }
   body.touch #npc-box input, body.touch #npc-box select { font-size: 16px; }
 </style>
+<link rel="stylesheet" href="studio.css">
 <script type="importmap">
   { "imports": { "three": "./vendor/three/three.module.js",
                  "three/addons/controls/TransformControls.js": "./vendor/three/TransformControls.js" } }
@@ -821,7 +822,7 @@
       <button id="quit" role="menuitem">Quit the editor<span>it also stops when you close this tab</span></button>
     </div>
   </div>
-  <div class="psec">
+  <div class="psec" id="sec-cell">
     <div class="cell-row"><button id="cell-btn" title="Choose a cell"><i data-icon="pin"></i><span id="cell-name">…</span><i data-icon="chevDown"></i></button>
       <button id="cell-edit" class="icon" title="This cell's light and water (a cell made in this project)" style="display:none"><i data-icon="sliders"></i></button></div>
     <div id="others" style="display:none"></div>
@@ -901,6 +902,7 @@
   <details id="settings" class="fold">
     <summary>Settings</summary>
     <div class="body">
+      <label class="opt desktop-only" title="The page loads again with the other layout">Layout <select id="layout"><option value="studio">Toolbar and inspector</option><option value="panels">One panel</option></select></label>
       <label class="opt desktop-only">Panel <select id="dock"><option value="dock">Docked</option><option value="float">Floating</option></select></label>
       <label class="opt">Gizmo snaps to steps <input type="checkbox" id="snap"></label>
       <label class="opt">Fly speed <input type="number" id="fly-speed" min="10" max="10000" step="10"></label>
