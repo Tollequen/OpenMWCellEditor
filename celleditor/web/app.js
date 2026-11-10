@@ -5152,7 +5152,7 @@ function setupStudio() {
   };
   body.classList.add('studio');
 
-  const settings = tool('tb-settings', 'sliders', 'Settings: steps, speeds, grid, layout');
+  const settings = tool('tb-settings', 'gear', 'Settings: steps, speeds, grid, layout');
   const keys = tool('tb-keys', 'keyboard', 'Controls: every key, and the key hints along the bottom');
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
