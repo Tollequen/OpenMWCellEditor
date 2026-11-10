@@ -139,8 +139,9 @@ function setGizmoMode(mode) {
 // steps" moves and turns by the steps in Settings. Both are switched in the floating bar of the selection.
 function updateSnap() {
   const on = $('snap').checked;
-  const pieces = grid.snap && roots().length && roots().every((o) => isPiece(o.userData.ref.mesh));
-  gizmo.setTranslationSnap(on && !grid.snap ? state.moveStep : null);
+  const snapping = gridSnap();
+  const pieces = snapping && selKind() === 'pieces';
+  gizmo.setTranslationSnap(on && !snapping ? state.moveStep : null);
   gizmo.setRotationSnap(pieces ? Math.PI / 2 : on ? state.rotStep * DEG : null);
   paintGrid();
 }
@@ -152,14 +153,19 @@ function updateSnap() {
 
 const GRID_STEPS = [64, 128, 256];
 const GRID_Z = 64;
-const grid = { on: stored('ce-grid') === '1', snap: stored('ce-grid-snap') === '1',
+// snap to grid is remembered apart for room pieces and for other objects (off for both at first)
+const grid = { on: stored('ce-grid') === '1', pieces: stored('ce-grid-snap-pieces') === '1',
+               other: stored('ce-grid-snap-other') === '1',
                step: GRID_STEPS.includes(+stored('ce-grid-step')) ? +stored('ce-grid-step') : 128, lines: null, z: 0 };
 const isPiece = (mesh) => !!mesh && /(^|[\\/])[ixd][\\/]/i.test(mesh);
 const toStep = (v, s) => Math.round(v / s) * s;
+// which setting the selection follows: room pieces' if it's all room pieces
+const selKind = () => (roots().length && roots().every((o) => isPiece(o.userData.ref.mesh)) ? 'pieces' : 'other');
+const gridSnap = (mesh) => grid[mesh === undefined ? selKind() : isPiece(mesh) ? 'pieces' : 'other'];
 
 // a position on the grid; moved: only the axes that were moved
 function snapPiece(pos, mesh, moved = [true, true, true]) {
-  if (!grid.snap) return pos;
+  if (!gridSnap(mesh)) return pos;
   const piece = isPiece(mesh);
   return pos.map((v, i) => (!moved[i] || (i === 2 && !piece) ? v : toStep(v, i === 2 ? GRID_Z : grid.step)));
 }
@@ -215,15 +221,17 @@ setInterval(() => levelGrid(), 600);
 
 function paintGrid() {
   const steps = $('snap').checked;
-  const gridOn = `On: objects land on the grid's squares of ${grid.step} (walls and floors also turn by quarter turns), `
-    + 'and the grid shows while you move them. Click to move freely.';
-  const gridOff = 'Off. Click to make objects land on the grid, so room pieces fit each other without adjusting.';
+  const pieces = selKind() === 'pieces', snapOn = gridSnap();
+  const what = pieces ? 'Walls, floors and doors' : 'Objects other than walls, floors and doors';
+  const gridOn = `On for ${what.toLowerCase()}: they land on the grid's squares of ${grid.step}`
+    + `${pieces ? ', 64 units apart in height, and turn by quarter turns' : ''}; the grid shows while you move them. Click to move freely.`;
+  const gridOff = `Off for ${what.toLowerCase()}. Click to make them land on the grid${pieces ? ', so they fit each other without adjusting' : ''}.`;
   const stepsOn = `On: moves in steps of ${state.moveStep} and turns in steps of ${state.rotStep}° (Settings). Click to turn off.`;
   const stepsOff = `Off. Click to move in steps of ${state.moveStep} and turn in steps of ${state.rotStep}°.`;
   for (const [id, on, yes, no] of [
     ['grid-btn', grid.on, 'On: a grid of squares on the floor under you. Click to hide it.',
      'Off. Click for a grid of squares on the floor under you (a new cell always has one).'],
-    ['qa-grid', grid.snap, gridOn, gridOff], ['tb-snapgrid', grid.snap, gridOn, gridOff],
+    ['qa-grid', snapOn, gridOn, gridOff], ['tb-snapgrid', snapOn, gridOn, gridOff],
     ['qa-steps', steps, stepsOn, stepsOff], ['tb-snapsteps', steps, stepsOn, stepsOff]]) {
     $(id).classList.toggle('on', on);
     $(id).setAttribute('aria-pressed', String(on));
@@ -233,7 +241,8 @@ function paintGrid() {
 function storeGrid() {
   try {
     localStorage.setItem('ce-grid', grid.on ? '1' : '0');
-    localStorage.setItem('ce-grid-snap', grid.snap ? '1' : '0');
+    localStorage.setItem('ce-grid-snap-pieces', grid.pieces ? '1' : '0');
+    localStorage.setItem('ce-grid-snap-other', grid.other ? '1' : '0');
     localStorage.setItem('ce-grid-step', grid.step);
   } catch (err) { /* private mode */ }
 }
@@ -241,10 +250,12 @@ for (const s of GRID_STEPS) $('grid-step').add(new Option(String(s), s));
 $('grid-step').value = grid.step;
 $('grid-btn').addEventListener('click', () => { grid.on = !grid.on; storeGrid(); paintGrid(); showGrid(); });
 function toggleGridSnap() {
-  grid.snap = !grid.snap;
+  const kind = selKind();
+  grid[kind] = !grid[kind];
   storeGrid();
   updateSnap();
-  status(grid.snap ? `Snap to grid: objects land on squares of ${grid.step}.` : 'Snap to grid off.');
+  const what = kind === 'pieces' ? 'walls, floors and doors' : 'objects other than walls, floors and doors';
+  status(grid[kind] ? `Snap to grid on for ${what}: squares of ${grid.step}.` : `Snap to grid off for ${what}.`);
 }
 function toggleStepSnap() {
   $('snap').checked = !$('snap').checked;
@@ -257,7 +268,7 @@ $('grid-step').addEventListener('change', (e) => { grid.step = +e.target.value; 
 paintGrid();
 
 gizmo.addEventListener('dragging-changed', (e) => {
-  if (grid.snap && gizmo.mode === 'translate' && grid.dragging !== e.value) {
+  if ((gridSnap() || grid.dragging) && gizmo.mode === 'translate' && grid.dragging !== e.value) {
     grid.dragging = e.value;
     showGrid();
   }
