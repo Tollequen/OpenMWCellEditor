@@ -328,6 +328,36 @@
   #quick-acts.open { display: flex; }
   #qa-name { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: 4px; }
   #quick-acts button { flex: none; }
+  #painter { display: none; position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 4; padding: 8px;
+             background: var(--float); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+             flex-direction: column; gap: 6px; }
+  body:not(.panel-hidden):not(.touch) #painter { left: calc(var(--pw) + 22px); }
+  #n-add #paint-rooms { width: 100%; margin-top: 6px; justify-content: flex-start; }
+  body.painting #painter { display: flex; }
+  body.painting #quick-acts, body.painting #mouselook { display: none; }
+  body.painting #toast { top: 12px; bottom: auto; }
+  .pt-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .pt-row .spacer { flex: 1; }
+  #pt-style { gap: 6px; max-width: 220px; }
+  #pt-style-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pt-search { width: 160px; }
+  #pt-info { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #pt-left svg { transform: scaleX(-1); }
+  .pt-strip-row { display: flex; align-items: center; gap: 4px; }
+  #pt-strip { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 2px 0;
+              scrollbar-width: thin; }
+  .pt-cell { flex: none; width: 84px; display: flex; flex-direction: column; gap: 3px; padding: 3px; cursor: pointer;
+             border: 1px solid transparent; border-radius: var(--radius); }
+  .pt-cell:hover { background: var(--panel-2); }
+  .pt-cell.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .pt-cell .th { aspect-ratio: 1; border-radius: var(--radius); background: #1c1c24; display: flex; align-items: center;
+                 justify-content: center; overflow: hidden; color: #8a8a96; font-size: 11px; }
+  .pt-cell .th img { width: 100%; height: 100%; display: block; }
+  .pt-cell .cn { font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.painter-big #pt-strip { flex-wrap: wrap; overflow-x: hidden; overflow-y: auto; max-height: 50vh; }
+  body.painter-big #pt-prev, body.painter-big #pt-next { display: none; }
+  #pt-empty { flex: 1; }
+  .pt-help { font-size: 11px; }
   #qa-snaps { display: flex; gap: 4px; flex: none; }
   #qa-snaps:not(:first-child) { padding-left: 6px; border-left: 1px solid var(--line-soft); }
   #quick-acts .qa-toggle { color: var(--dim); }
@@ -815,6 +845,7 @@
       <button id="add-npc" title="A new NPC: name them, then click where they should stand (or right-click a surface)"><i data-icon="person"></i>Add NPC…</button>
       <button id="add-item" title="Make a new weapon, armour, clothing, misc item or book. To place an existing one, use Add object"><i data-icon="sword"></i>New item…</button>
     </div>
+    <div class="pair one desktop-only"><button id="paint-rooms" title="Build rooms from room pieces: click on the grid to place them"><i data-icon="grid"></i>Room painter…</button></div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
   </div>
   <div class="psec n-only" id="n-view"><h3>View</h3><div id="n-view-list"></div></div>
@@ -909,6 +940,26 @@
 <button id="show-panel" class="icon" title="Show the panel (P)"><i data-icon="sidebar"></i></button>
 <div id="ctxmenu"></div>
 <div id="sec-menu" class="sec-menu" role="menu"><button id="sec-dock" role="menuitem">Back to the panel</button><button id="sec-dock-all" role="menuitem">All back to the panel</button></div>
+<div id="painter">
+  <div class="pt-row">
+    <button id="pt-style" title="Choose another palette"><i data-icon="grid"></i><span id="pt-style-name"></span></button>
+    <input id="pt-search" type="search" placeholder="Filter the pieces" autocomplete="off">
+    <span id="pt-info"></span>
+    <span class="spacer"></span>
+    <button id="pt-left" class="icon" title="Turn left (Z)"><i data-icon="rotate"></i></button>
+    <button id="pt-right" class="icon" title="Turn right (X)"><i data-icon="rotate"></i></button>
+    <button id="pt-down" title="Lower by 64 (Page Down)">Lower</button>
+    <button id="pt-up" title="Raise by 64 (Page Up)">Raise</button>
+    <button id="pt-big" class="icon" title="Show all the pieces"><i data-icon="maximize"></i></button>
+    <button id="pt-done" class="primary" title="Leave the room painter (Escape)">Done</button>
+  </div>
+  <div class="pt-strip-row">
+    <button id="pt-prev" class="icon" title="Scroll left"><i data-icon="left"></i></button>
+    <div id="pt-strip"></div><div id="pt-empty" class="npc-hint">No pieces match.</div>
+    <button id="pt-next" class="icon" title="Scroll right"><i data-icon="right"></i></button>
+  </div>
+  <div class="npc-hint pt-help">Click or drag to place · Z, X turn · Page Up, Page Down height · wheel or [ ] picks the piece (Shift and the wheel move) · right-click takes away a piece you added</div>
+</div>
 <div id="place-banner" class="banner">
   <span id="place-text">Click where to place the object (a floor, a table, a wall).</span>
   <button id="place-cancel">Cancel</button>

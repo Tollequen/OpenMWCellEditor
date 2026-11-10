@@ -174,7 +174,7 @@ function snapPiece(pos, mesh, moved = [true, true, true]) {
 function showGrid() {
   if (grid.lines) { grid.lines.parent?.remove(grid.lines); grid.lines.geometry.dispose(); grid.lines = null; }
   const cell = state.cell;
-  if (!cell || !(grid.on || cell.new || grid.dragging)) { requestRender(); return; }
+  if (!cell || !(grid.on || cell.new || grid.dragging || painter.on)) { requestRender(); return; }
   const size = 8192, squares = Math.max(grid.step, 128);
   // light lines over a cell's floor, dimmer ones over a new cell's dark background
   grid.lines = new THREE.GridHelper(size, size / squares, cell.new ? 0x8a8f9c : 0xffffff, cell.new ? 0x4a4e58 : 0xcfe0ff);
@@ -187,6 +187,19 @@ function showGrid() {
   levelGrid(true);
 }
 
+// the floor seen in the lower half of the view: the height most of a few rays land on, or null
+function floorSeen() {
+  const seen = [];
+  for (const [x, y] of [[0, -0.35], [-0.45, -0.55], [0.45, -0.55], [0, -0.75], [-0.3, -0.85], [0.3, -0.85]]) {
+    raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+    const h = raycaster.intersectObjects(world.children, true)
+      .find((o) => visibleChain(o.object) && !o.object.userData.water);
+    if (h?.face && h.face.normal.clone().transformDirection(h.object.matrixWorld).z > 0.6) seen.push(Math.round(h.point.z / 4) * 4);
+  }
+  const count = (v) => seen.filter((s) => s === v).length;
+  return seen.length ? seen.reduce((a, b) => (count(b) > count(a) ? b : a)) : null;
+}
+
 // keep the grid where you work: on the floor you're looking at, else the one below the camera (a new cell's is
 // at 0), centred on a square near the camera
 function levelGrid(now = false) {
@@ -196,17 +209,10 @@ function levelGrid(now = false) {
     // under what's being moved
     const b = boxOf(roots());
     z = b.min.z + 1;
+  } else if (painter.on) {
+    z = painter.level;
   } else if (!state.cell.new) {
-    // the floor seen in the lower half of the view: the height most of a few rays land on
-    const seen = [];
-    for (const [x, y] of [[0, -0.35], [-0.45, -0.55], [0.45, -0.55], [0, -0.75], [-0.3, -0.85], [0.3, -0.85]]) {
-      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-      const h = raycaster.intersectObjects(world.children, true)
-        .find((o) => visibleChain(o.object) && !o.object.userData.water);
-      if (h?.face && h.face.normal.clone().transformDirection(h.object.matrixWorld).z > 0.6) seen.push(Math.round(h.point.z / 4) * 4);
-    }
-    const count = (v) => seen.filter((s) => s === v).length;
-    const hit = seen.length ? seen.reduce((a, b) => (count(b) > count(a) ? b : a)) : null;
+    const hit = floorSeen();
     if (hit == null && !now) return;
     z = hit != null ? hit + 1.5 : camera.position.z - 120;
     if (!now && Math.abs(z - grid.z) < 6) z = grid.z;
@@ -1033,6 +1039,7 @@ async function fetchCell(name) {
 }
 
 async function loadCell(name, keepCamera = false) {
+  closePainter();
   select(null);
   $('loading').style.display = '';
   state.loadingCell = true;
@@ -2781,6 +2788,273 @@ function placeAt(ndcX, ndcY) {
 
 $('place-cancel').addEventListener('click', () => stopPlacing());
 
+// --- Room painter -----------------------------------------------------------
+// A mode for building rooms from room pieces: choose a palette (one style of the load order's room pieces, or
+// all of them), then each click puts the chosen piece on the grid square under the pointer, at the painter's
+// height. The bar at the bottom picks the piece (or the wheel does), Z and X turn it by quarter turns, Page Up
+// and Page Down change the height by 64, a short right-click takes away a piece added in this cell.
+
+const painter = { on: false, style: '', all: [], pieces: [], at: 0, yaw: 0, level: 0, ghost: null, ghostMesh: '',
+                  stroke: null, wheel: 0, point: null, token: 0, thumbObserver: null };
+const STYLE_ALIASES = { lava: 'lavacave', mold: 'moldcave', mud: 'mudcave', py: 'pycave', bone: 'bonecave',
+                        strong: 'stronghold', strongruin: 'stronghold', r: 'redoran', h: 'hlaalu', v: 'vivec',
+                        impsmall: 'imperial', imp: 'imperial', common: 'c', dwe: 'dwrv' };
+const STYLE_NAMES = { hlaalu: 'Hlaalu', redoran: 'Redoran', t: 'Telvanni', c: 'Common', vivec: 'Vivec', de: 'Dunmer',
+                      dwrv: 'Dwemer', dae: 'Daedric', sewer: 'Sewers', nord: 'Nord', ashl: 'Ashlander', imperial: 'Imperial',
+                      velothismall: 'Velothi tomb, small', velothilarge: 'Velothi tomb, large', lavacave: 'Lava cave',
+                      moldcave: 'Mould cave', mudcave: 'Mud cave', bonecave: 'Bone cave', pycave: 'Rock cave',
+                      stronghold: 'Stronghold', dagoth: 'Sixth House', cavern: 'Cavern', cave: 'Cave', ruin: 'Ruin',
+                      bm: 'Bloodmoon', mh: 'Mournhold', om: 'Old Mournhold', colony: 'Raven Rock', gg: 'Ghostgate',
+                      redwall: 'Red Mountain wall', velothi: 'Velothi' };
+
+// a room piece's style: "in_hlaalu" for in_hlaalu_room_corner
+function styleOf(o) {
+  const m = o.id.toLowerCase().match(/^(in|ex)_([a-z0-9]+)/);
+  if (!m) return null;
+  const k = m[2].replace(/(\D)\d+$/, '$1');               // in_bonecave2 is in_bonecave's
+  return `${m[1]}_${STYLE_ALIASES[k] || k}`;
+}
+function styleName(key) {
+  if (!key) return 'All room pieces';
+  const [side, k] = [key.slice(0, 2), key.slice(3)];
+  return STYLE_NAMES[k] ? STYLE_NAMES[k] + (side === 'ex' ? ' (outside)' : '') : key;
+}
+
+async function openPainter(at = null) {
+  if (!state.cell) return;
+  const why = cantAdd();
+  if (why) { status(why, true); return; }
+  if (document.pointerLockElement) pauseFly();
+  closeMenu();
+  stopPlacing();
+  painter.all = [...itemsWin.newItems(), ...await opening(getCatalog())].filter((o) => isPiece(o.mesh))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const counts = new Map();
+  for (const o of painter.all) { const s = styleOf(o); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
+  const style = await choose({
+    title: 'Room painter: choose a palette', none: 'All room pieces', current: painter.style,
+    items: [...counts].filter(([, n]) => n >= 6).map(([k, n]) => ({
+      id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${n} pieces` })) });
+  if (style == null) { resumeFlySoon(); return; }
+  painter.style = style;
+  painter.at = 0;
+  if (!painter.on) {
+    painter.on = true;
+    painter.yaw = 0;
+    painter.level = at != null ? toStep(at, GRID_Z) : state.cell.new ? 0 : toStep(floorSeen() ?? camera.position.z - 120, GRID_Z);
+    select(null);
+    gizmo.detach();
+    document.body.classList.add('painting');
+    canvas.style.cursor = 'crosshair';
+    showGrid();
+  }
+  $('pt-search').value = '';
+  filterPainter();
+  status('Room painter: click to place, Z and X turn, Page Up and Down change the height, the wheel picks the piece.');
+}
+
+function closePainter() {
+  if (!painter.on) return;
+  endStroke();
+  painter.on = false;
+  painter.point = null;
+  setGhost(null);
+  document.body.classList.remove('painting', 'painter-big');
+  canvas.style.cursor = '';
+  showGrid();
+  syncGizmo();
+  status('');
+}
+
+function filterPainter() {
+  const words = $('pt-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const cur = painter.pieces[painter.at];
+  painter.pieces = painter.all.filter((o) => (!painter.style || styleOf(o) === painter.style)
+    && words.every((w) => (o.id + ' ' + (o.name || '')).toLowerCase().includes(w)));
+  painter.at = Math.max(0, painter.pieces.indexOf(cur));
+  $('pt-style-name').textContent = styleName(painter.style);
+  const strip = $('pt-strip');
+  strip.innerHTML = '';
+  painter.thumbObserver?.disconnect();
+  painter.thumbObserver = new IntersectionObserver((seen) => {
+    for (const e of seen) {
+      if (!e.isIntersecting) continue;
+      painter.thumbObserver.unobserve(e.target);
+      const o = painter.pieces[+e.target.dataset.i];
+      if (o) thumbPicture(o.mesh).then((pic) => { if (e.target.isConnected) putThumb(e.target.querySelector('.th'), pic); });
+    }
+  }, { root: strip, rootMargin: '0px 400px' });
+  painter.pieces.forEach((o, i) => {
+    const cell = strip.appendChild(document.createElement('div'));
+    cell.className = 'pt-cell';
+    cell.dataset.i = i;
+    cell.title = o.name && o.name !== o.id ? `${o.name} (${o.id})` : o.id;
+    cell.innerHTML = '<div class="th"></div><div class="cn"></div>';
+    cell.querySelector('.cn').textContent = o.id.replace(/^(in|ex)_/i, '');
+    cell.addEventListener('click', () => pickPiece(i));
+    painter.thumbObserver.observe(cell);
+  });
+  $('pt-empty').style.display = painter.pieces.length ? 'none' : '';
+  pickPiece(painter.at);
+}
+
+function pickPiece(i) {
+  if (!painter.pieces.length) { setGhost(null); paintInfo(); return; }
+  painter.at = (i + painter.pieces.length) % painter.pieces.length;
+  const cells = $('pt-strip').children;
+  for (const c of cells) c.classList.toggle('sel', +c.dataset.i === painter.at);
+  cells[painter.at]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  setGhost(painter.pieces[painter.at].mesh);
+  paintInfo();
+}
+
+function paintInfo() {
+  const o = painter.pieces[painter.at];
+  const deg = Math.round(((painter.yaw / DEG) % 360 + 360) % 360);
+  $('pt-info').textContent = o ? `${o.id} · facing ${deg}° · height ${painter.level}` : `height ${painter.level}`;
+}
+
+// the see-through piece where a click would put it
+async function setGhost(mesh) {
+  const token = ++painter.token;
+  if (painter.ghost && painter.ghostMesh !== mesh) {
+    painter.ghost.parent?.remove(painter.ghost);
+    painter.ghost.traverse((m) => { if (m.isMesh) m.material.dispose(); });
+    painter.ghost = null;
+  }
+  painter.ghostMesh = mesh || '';
+  if (!mesh || painter.ghost) { moveGhost(); return; }
+  const parts = await meshParts(mesh);
+  if (token !== painter.token || !painter.on) return;
+  const g = new THREE.Group();
+  for (const p of parts) {
+    const m = new THREE.Mesh(p.geometry, p.material.clone());
+    Object.assign(m.material, { transparent: true, opacity: 0.55, depthWrite: false });
+    m.raycast = () => {};
+    g.add(m);
+  }
+  g.matrixAutoUpdate = false;
+  painter.ghost = g;
+  world.add(g);
+  moveGhost();
+}
+
+function moveGhost() {
+  const g = painter.ghost;
+  if (!g) return;
+  if (g.parent !== world) world.add(g);
+  g.visible = !!painter.point;
+  if (painter.point) {
+    g.matrix.copy(refMatrix({ pos: painter.point, rot: [0, 0, painter.yaw], scale: 1 }));
+    g.matrixWorldNeedsUpdate = true;
+  }
+  requestRender();
+}
+
+// the grid square under the pointer, at the painter's height
+function paintPoint(x, y) {
+  raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
+  const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -painter.level), new THREE.Vector3());
+  if (!p || p.distanceTo(camera.position) > 20000) return null;
+  return [toStep(p.x, grid.step), toStep(p.y, grid.step), painter.level];
+}
+
+function paintHover(e) {
+  painter.point = e.target === canvas && !state.looking ? paintPoint(e.clientX, e.clientY) : null;
+  moveGhost();
+  if (painter.stroke && painter.point) paintHere();
+}
+
+// put the piece where the ghost is (once per square in a stroke, and not on the same piece)
+async function paintHere() {
+  const o = painter.pieces[painter.at];
+  const pos = painter.point;
+  if (!o || !pos) return;
+  const sq = `${pos.join(',')},${painter.yaw.toFixed(3)}`;
+  if (painter.stroke.done.has(sq)) return;
+  painter.stroke.done.add(sq);
+  const same = state.edits.added.some((a) => a.cell === state.cell.name && a.id === o.id && !state.edits.deleted.includes('added|' + a.uid)
+    && a.pos.every((v, i) => Math.abs(v - pos[i]) < 0.5) && Math.cos(a.rot[2] - painter.yaw) > 0.9999);
+  if (same) return;
+  const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const tag = state.newTag || null;
+  const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: 'mesh', mesh: o.mesh, pos: [...pos], rot: [0, 0, painter.yaw], scale: 1,
+              editable: true, origin: 'added', structure: false, tag, ...typeFlags(o.type) };
+  r.orig = { pos: [...r.pos], rot: [...r.rot] };
+  state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...r.pos], rot: [...r.rot], scale: 1, tag });
+  state.cell.refs.push(r);
+  const obj = await makeObject(r);
+  world.add(obj);
+  objByKey.set(r.key, obj);
+  state.undo.push({ obj, added: uid });
+  painter.stroke.count++;
+  refreshVisibility();
+  updateDirty();
+}
+
+function startStroke(e) {
+  painter.stroke = { from: state.undo.length, before: entriesOf(state.edits), done: new Set(), count: 0 };
+  paintHover(e);
+}
+
+function endStroke() {
+  const s = painter.stroke;
+  if (!s) return;
+  painter.stroke = null;
+  if (s.count > 1) {
+    joinSteps(s.from, s.before);
+    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = `painted ${s.count} pieces`;
+  }
+  if (s.count) status(`Placed ${s.count === 1 ? painter.pieces[painter.at]?.id : `${s.count} pieces`}.`);
+  updateDirty();
+}
+
+// a short right-click: take away the piece under the pointer if it was added in this cell
+function paintErase(x, y) {
+  raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
+  const hit = raycaster.intersectObjects(world.children, true).find((h) => visibleChain(h.object) && refOf(h.object));
+  const obj = hit && refOf(hit.object);
+  const r = obj?.userData.ref;
+  if (!r || r.origin !== 'added' || !r.editable) { status('Right-click takes away pieces added here; other objects stay.'); return; }
+  state.undo.push({ obj, deleted: [obj] });
+  state.edits.deleted.push(r.key);
+  refreshVisibility();
+  updateDirty();
+  status(`Took away ${r.src}.`);
+}
+
+function paintTurn(sign) { painter.yaw = wrapAngle(painter.yaw + sign * Math.PI / 2); paintInfo(); moveGhost(); }
+function paintLevel(sign) {
+  painter.level += sign * GRID_Z;
+  if (painter.point) painter.point[2] = painter.level;
+  paintInfo();
+  moveGhost();
+  levelGrid(true);
+}
+
+$('paint-rooms').addEventListener('click', () => openPainter());
+$('pt-style').addEventListener('click', () => openPainter());
+$('pt-done').addEventListener('click', closePainter);
+$('pt-left').addEventListener('click', () => paintTurn(-1));
+$('pt-right').addEventListener('click', () => paintTurn(1));
+$('pt-up').addEventListener('click', () => paintLevel(1));
+$('pt-down').addEventListener('click', () => paintLevel(-1));
+$('pt-prev').addEventListener('click', () => { $('pt-strip').scrollBy({ left: -$('pt-strip').clientWidth * 0.8, behavior: 'smooth' }); });
+$('pt-next').addEventListener('click', () => { $('pt-strip').scrollBy({ left: $('pt-strip').clientWidth * 0.8, behavior: 'smooth' }); });
+$('pt-big').addEventListener('click', () => {
+  document.body.classList.toggle('painter-big');
+  $('pt-big').title = document.body.classList.contains('painter-big') ? 'Back to one row' : 'Show all the pieces';
+  pickPiece(painter.at);
+});
+$('pt-search').addEventListener('input', filterPainter);
+$('pt-search').addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter') e.target.blur(); });
+// the wheel over the bar's row scrolls it sideways
+$('pt-strip').addEventListener('wheel', (e) => {
+  if (document.body.classList.contains('painter-big') || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  e.preventDefault();
+  $('pt-strip').scrollLeft += e.deltaY;
+}, { passive: false });
+
 // Add object…: choose the object, then where it goes.
 function addObject() {
   if (!state.cell) return;
@@ -2951,6 +3225,7 @@ function openMenuAt(x, y, own = null, before = []) {
     if (target) m.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
     item('Add object here…', () => addAt(hit));
     item('Add NPC here…', () => addAt(hit, 'npc'));
+    if (!TOUCH) item('Room painter here…', () => openPainter(hit.point.z));
   }
   showAddMarker(hit);
   m.classList.add('open');
@@ -3298,6 +3573,7 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
   down = { x: e.clientX, y: e.clientY, button: e.button, onGizmo: gizmo.axis !== null && !state.mouseLook };
+  if (painter.on && e.button === 0 && !state.mouseLook) { down = null; startStroke(e); return; }
   if (state.mouseLook) {
     if (e.button === 0 && state.placing) { placeAt(0, 0); return; }
     if (e.button === 0) pickAt(0, 0, e.metaKey || e.ctrlKey, e.altKey);
@@ -3316,12 +3592,14 @@ canvas.addEventListener('mousedown', (e) => {
 });
 window.addEventListener('mouseup', (e) => {
   if (fromTouch()) { down = null; return; }
+  if (e.button === 0) endStroke();
   if (e.button === 2 && state.rightDrag) {
     state.rightDrag = false;
     state.looking = false;
     state.lookEnded = performance.now();
     if (state.lookMoved < 6 && down && e.target === canvas) {
-      if (state.placing) stopPlacing(); else openMenuAt(down.x, down.y);
+      if (painter.on) paintErase(down.x, down.y);
+      else if (state.placing) stopPlacing(); else openMenuAt(down.x, down.y);
     }
   }
   if (e.button === 0 && down && !down.onGizmo && !state.mouseLook && e.target === canvas
@@ -3337,6 +3615,7 @@ canvas.addEventListener('dblclick', (e) => {
   pickAt(...ndc(e.clientX, e.clientY), e.metaKey || e.ctrlKey, true);
 });
 window.addEventListener('mousemove', (e) => {
+  if (painter.on && !state.mouseLook) paintHover(e);
   if (state.placing && !state.looking && e.target === canvas) {
     showAddMarker(surfaceAt(...(state.mouseLook ? [0, 0] : ndc(e.clientX, e.clientY))));
   }
@@ -3354,6 +3633,12 @@ const wheel = { at: 0, dist: 600 };
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (gizmo.dragging) return;
+  if (painter.on && !e.shiftKey) {
+    // the wheel picks the piece (Shift and the wheel move the camera); a trackpad's small scrolls add up
+    painter.wheel += e.deltaMode ? e.deltaY * 40 : e.deltaY;
+    if (Math.abs(painter.wheel) >= 60) { pickPiece(painter.at + Math.sign(painter.wheel)); painter.wheel = 0; }
+    return;
+  }
   const notches = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY * 10 : e.deltaY / 100;
   if (!notches) return;
   const now = performance.now();
@@ -3388,6 +3673,12 @@ window.addEventListener('keydown', (e) => {
   if (mod && k === 'g') { e.preventDefault(); if (e.shiftKey) ungroupSelected(); else groupButton(); return; }
   if (mod && k === 'd') { e.preventDefault(); duplicateSelected(); return; }
   if (mod) return;
+  if (painter.on) {
+    if (k === 'z' || k === 'x') { paintTurn(k === 'z' ? -1 : 1); return; }
+    if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); paintLevel(e.key === 'PageUp' ? 1 : -1); return; }
+    if (k === 'escape') { closePainter(); return; }
+    if (k === '[' || k === ']') { pickPiece(painter.at + (k === '[' ? -1 : 1)); return; }
+  }
   state.keys.add(e.code);
   const step = { ArrowUp: [1, 0, 0], ArrowDown: [-1, 0, 0], ArrowRight: [0, 1, 0], ArrowLeft: [0, -1, 0],
                  PageUp: [0, 0, 1], PageDown: [0, 0, -1] }[e.key];
@@ -4380,7 +4671,7 @@ async function save() {
 // markup, with shorter labels and icons; setLayout('classic') puts them back (each place is kept by a comment).
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
-  ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
+  ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['paint-rooms', 'n-add'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
   ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
