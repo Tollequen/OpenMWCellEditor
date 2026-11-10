@@ -30,8 +30,8 @@ body.studio.mouse-look #topbar, body.studio.mouse-look #inspector { display: non
 #topbar .menu { left: 0; top: calc(100% + 6px); }
 #topbar .cell-row { flex: 0 1 270px; min-width: 150px; }
 #topbar #others { margin: 0; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; }
-body.studio #n-modes { display: flex; margin: 0; flex: none; }
-body.studio #n-modes button { padding: 0 12px; height: 28px; }
+body.studio #n-modes { grid-column: 1 / -1; margin: 0; }
+body.studio #sel-edit #n-modes button { justify-content: center; height: 30px; }
 body.studio #qa-snaps { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0; border: none; }
 body.studio #qa-snaps button { color: var(--dim); justify-content: center !important; }
 body.studio #qa-snaps button.on { color: var(--text); }
@@ -39,7 +39,6 @@ body.studio #qa-snaps button.on { color: var(--text); }
 body.studio #save { padding: 4px 16px 4px 12px; font-weight: 600; }
 @media (max-width: 1240px) {
   #topbar :not(#save) > .n-lbl { display: none !important; }
-  body.studio #n-modes button { padding: 0 9px; }
 }
 @media (max-width: 940px) {
   #topbar #mouselook { font-size: 0; gap: 0; width: 30px; padding: 4px; }

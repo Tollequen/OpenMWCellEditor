@@ -5124,8 +5124,8 @@ function setupStudio() {
   const keys = tool('tb-keys', 'keyboard', 'Every control (the quick guide: ?)');
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
-  top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'), sep(), group($('undo'), $('redo')), sep(),
-             $('n-modes'), make('span', '', 'spacer'), $('mouselook'), sep(),
+  top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'), sep(), group($('undo'), $('redo')),
+             make('span', '', 'spacer'), $('mouselook'), sep(),
              group(settings, keys, $('fullscreen'), $('hide-panel')), $('save'));
   body.append(top);
 
@@ -5159,7 +5159,7 @@ function setupStudio() {
   const insp = make('div', 'inspector');
   insp.append($('sec-selected'));
   body.append(insp);
-  $('sel-edit').prepend($('qa-snaps'));
+  $('sel-edit').prepend($('n-modes'), $('qa-snaps'));
   const close = tool('insp-close', 'x', 'Deselect (Esc)');
   close.classList.add('ghost');
   close.addEventListener('click', () => select(null));
