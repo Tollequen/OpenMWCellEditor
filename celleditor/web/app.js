@@ -3874,6 +3874,14 @@ canvas.addEventListener('wheel', (e) => {
   aimCamera();
 }, { passive: false });
 
+// back in the view, a clicked button no longer holds the keys
+for (const type of ['pointerenter', 'pointerdown']) {
+  canvas.addEventListener(type, () => {
+    const at = document.activeElement;
+    if (at && (at.tagName === 'BUTTON' || at.type === 'checkbox')) at.blur();
+  });
+}
+
 window.addEventListener('keydown', (e) => {
   if ((e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') || e.target.tagName === 'SELECT') return;
   if ($('picker').classList.contains('open') || $('historybox').classList.contains('open')) return;
@@ -3909,7 +3917,14 @@ window.addEventListener('keydown', (e) => {
     else nudge(...step);
     return;
   }
-  if (e.key === 'Tab') { e.preventDefault(); setMouseLook(!state.mouseLook); return; }
+  if (e.key === 'Tab') {
+    // on a button or switch of a panel, Tab moves on as in any form
+    const at = document.activeElement;
+    if (!state.mouseLook && at && at !== document.body && at !== canvas) return;
+    e.preventDefault();
+    setMouseLook(!state.mouseLook);
+    return;
+  }
   if (k === 't') { setGizmoMode('translate'); return; }
   if (k === 'p') { togglePanel(); return; }
   if (k === 'r') { setGizmoMode('rotate'); return; }
