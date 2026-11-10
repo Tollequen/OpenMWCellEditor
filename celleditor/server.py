@@ -783,6 +783,25 @@ def cell_settings(name, taken=()):
     return out
 
 
+_room_sets = []
+
+
+def room_sets(sets=None):
+    """The user's room sets (for every project), saved again when given: [{name, pieces: [{id, pos, rz}]}]."""
+    global _room_sets
+    if sets is not None:
+        clean = []
+        for s in sets:
+            pieces = [{"id": str(p["id"]), "pos": [round(float(v), 2) for v in p["pos"][:3]], "rz": round(float(p.get("rz", 0)), 5)}
+                      for p in s.get("pieces") or [] if p.get("id") and len(p.get("pos") or []) >= 3]
+            if str(s.get("name") or "").strip() and pieces:
+                clean.append({"name": str(s["name"]).strip()[:60], "pieces": pieces})
+        if SETTINGS:
+            SETTINGS.set("room_sets", clean)
+        _room_sets = clean
+    return SETTINGS.get("room_sets", []) if SETTINGS else _room_sets
+
+
 def item_new_id(base, taken=()):
     with LOCK:
         return {"id": project.items().free_id(base, taken)}
@@ -1516,6 +1535,11 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.reply(json.dumps(item_info(body["id"], body.get("edits") or {})).encode())
                 except KeyError:
                     return self.reply(b"{}", code=404)
+            if u.path == "/api/room-sets":
+                try:
+                    return self.reply(json.dumps({"sets": room_sets(body.get("sets"))}).encode())
+                except (KeyError, TypeError, ValueError):
+                    return self.reply(b'{"sets": []}', code=400)
             if u.path == "/api/cell/settings":
                 return self.reply(json.dumps(cell_settings(body.get("name") or "", body.get("taken") or [])).encode())
             if u.path == "/api/item/new-id":

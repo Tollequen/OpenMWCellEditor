@@ -937,7 +937,7 @@ const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, entriesO
                               changed: () => { updatePanel(); updateDirty(); refreshCell(); },
                               place: (o) => startPlacing('object', { o, opts: {} }) });
 const cellsWin = setupCells({ state, status, entriesOf, diffOf, changed: (ids) => showChanges(ids, false),
-                              go: (name) => { cellCache.delete(name); return loadCell(name); } });
+                              go: (name) => { cellCache.delete(name); return loadCell(name); }, build: () => openPainter() });
 $('cell-edit').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); cellsWin.edit(state.cell?.name); });
 
 // A new cell was made, changed or taken away: show the current one as it is now, or leave it
@@ -2788,14 +2788,15 @@ function placeAt(ndcX, ndcY) {
 
 $('place-cancel').addEventListener('click', () => stopPlacing());
 
-// --- Room painter -----------------------------------------------------------
-// A mode for building rooms from room pieces: choose a palette (one style of the load order's room pieces, or
-// all of them; the server finds them by how the game places them, pieces.py), then each click puts the chosen piece on the grid square under the pointer, at the painter's
-// height. The bar at the bottom picks the piece (or the wheel does), Z and X turn it by quarter turns, Page Up
-// and Page Down change the height by 64, a short right-click takes away a piece added in this cell.
+// --- Room builder -----------------------------------------------------------
+// A mode for building rooms: the panel shows a style's room pieces by what they're for (the server finds the
+// pieces by how the game places them, pieces.py) and the room sets saved from selections; each click puts the
+// chosen piece or set on the grid square under the pointer. Z and X turn it by quarter turns, Page Up and Page
+// Down change the height by 64, the wheel picks the next piece, a short right-click takes away a piece added here.
 
-const painter = { on: false, style: '', all: [], pieces: [], at: 0, yaw: 0, level: 0, ghost: null, ghostMesh: '',
-                  stroke: null, wheel: 0, point: null, token: 0, thumbObserver: null, lift: 0 };
+const painter = { on: false, style: '', all: [], pieces: [], at: 0, set: null, sets: [], yaw: 0, level: 0,
+                  ghost: null, ghostKey: '', square: null, stroke: null, wheel: 0, point: null, token: 0,
+                  thumbObserver: null, lift: 0, known: null, hidden: false };
 const STYLE_ALIASES = { lava: 'lavacave', mold: 'moldcave', mud: 'mudcave', py: 'pycave', bone: 'bonecave',
                         strong: 'stronghold', strongruin: 'stronghold', r: 'redoran', h: 'hlaalu', v: 'vivec',
                         impsmall: 'imperial', imp: 'imperial', common: 'c', dwe: 'dwrv' };
@@ -2806,6 +2807,15 @@ const STYLE_NAMES = { hlaalu: 'Hlaalu', redoran: 'Redoran', t: 'Telvanni', c: 'C
                       stronghold: 'Stronghold', dagoth: 'Sixth House', cavern: 'Cavern', cave: 'Cave', ruin: 'Ruin',
                       bm: 'Bloodmoon', mh: 'Mournhold', om: 'Old Mournhold', colony: 'Raven Rock', gg: 'Ghostgate',
                       redwall: 'Red Mountain wall', velothi: 'Velothi' };
+// what a piece is for, from its name (the first that matches)
+const PIECE_GROUPS = [['Doorways and doors', (o) => o.type === 'Door' || /door|jamb|djamb|entr|exit|arch/i.test(o.id)],
+                      ['Stairs and ramps', (o) => /stair|ramp|step/i.test(o.id)],
+                      ['Halls', (o) => /hall|corr|tunnel|passage|conn?ect/i.test(o.id)],
+                      ['Rooms', (o) => /room|corner|side|cent|middle|wall|floor|ceil|post|pillar|column|end/i.test(o.id)],
+                      ['Other', () => true]];
+const pieceGroup = (o) => PIECE_GROUPS.find(([, test]) => test(o))[0];
+// the order the panel shows them in
+const GROUP_ORDER = ['Rooms', 'Halls', 'Stairs and ramps', 'Doorways and doors', 'Other'];
 
 // a room piece's style: "in_hlaalu" for in_hlaalu_room_corner
 function styleOf(o) {
@@ -2820,6 +2830,37 @@ function styleName(key) {
   return STYLE_NAMES[k] ? STYLE_NAMES[k] + (side === 'ex' ? ' (outside)' : '') : key;
 }
 
+async function loadPieces() {
+  if (!painter.known) {
+    status('Finding the room pieces…');
+    painter.known = opening(fetch('/api/room-pieces').then((r) => r.json()).then((ids) => new Set(ids)));
+  }
+  let known;
+  try { known = await painter.known; } catch (err) { painter.known = null; status('The room pieces didn\'t load.', true); return false; }
+  painter.all = (await opening(getCatalog())).filter((o) => known.has(o.id.toLowerCase()));
+  painter.sets = await roomSets();
+  status('');
+  return true;
+}
+
+async function roomSets(sets = null) {
+  try {
+    const res = await fetch('/api/room-sets', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify(sets ? { sets } : {}) });
+    return (await res.json()).sets || [];
+  } catch (err) { return sets || []; }
+}
+
+async function chooseStyle() {
+  const counts = new Map();
+  for (const o of painter.all) { const s = styleOf(o); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
+  return choose({
+    title: 'Room builder: choose a style', none: 'All room pieces', current: painter.style,
+    items: [...counts].filter(([, n]) => n >= 6).map(([k, n]) => ({
+      id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${n} pieces` })) });
+}
+
+// at: the height to build at (a floor that was right-clicked)
 async function openPainter(at = null) {
   if (!state.cell) return;
   const why = cantAdd();
@@ -2827,41 +2868,57 @@ async function openPainter(at = null) {
   if (document.pointerLockElement) pauseFly();
   closeMenu();
   stopPlacing();
-  if (!painter.known) {
-    status('Finding the room pieces…');
-    painter.known = opening(fetch('/api/room-pieces').then((r) => r.json()).then((ids) => new Set(ids)));
+  if (!await loadPieces()) return;
+  if (!painter.style) {                          // the first time; then the style button changes it
+    const style = await chooseStyle();
+    if (style == null) { resumeFlySoon(); return; }
+    painter.style = style;
   }
-  let known;
-  try { known = await painter.known; } catch (err) { painter.known = null; status('The room pieces didn\'t load.', true); return; }
-  painter.all = (await opening(getCatalog())).filter((o) => known.has(o.id.toLowerCase()))
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const counts = new Map();
-  for (const o of painter.all) { const s = styleOf(o); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
-  const style = await choose({
-    title: 'Room painter: choose a palette', none: 'All room pieces', current: painter.style,
-    items: [...counts].filter(([, n]) => n >= 6).map(([k, n]) => ({
-      id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${n} pieces` })) });
-  if (style == null) { resumeFlySoon(); return; }
-  painter.style = style;
-  painter.at = 0;
   if (!painter.on) {
     painter.on = true;
     painter.yaw = 0;
     painter.level = at != null ? toStep(at, GRID_Z) : state.cell.new ? 0 : toStep(floorSeen() ?? camera.position.z - 120, GRID_Z);
+    painter.hidden = document.body.classList.contains('panel-hidden');
+    document.body.classList.remove('panel-hidden');
     select(null);
     gizmo.detach();
-    document.body.classList.add('painting');
+    document.body.classList.add('building');
     canvas.style.cursor = 'crosshair';
     showGrid();
+    resize();
   }
-  $('pt-search').value = '';
+  $('rb-search').value = '';
+  painter.set = null;
   filterPainter();
   liftPalette();
-  status('Room painter: click to place, Z and X turn, Page Up and Down change the height, the wheel picks the piece.');
 }
 
-// how high the palette's pieces are lifted so their floors stand on the grid: one height for the whole palette
-// (its pieces share the game's heights, so they keep fitting each other), from a room's middle or corner piece
+async function changeStyle() {
+  const style = await chooseStyle();
+  if (style == null) return;
+  painter.style = style;
+  painter.set = null;
+  filterPainter();
+  liftPalette();
+}
+
+function closePainter() {
+  if (!painter.on) return;
+  endStroke();
+  painter.on = false;
+  painter.point = null;
+  setGhost(null);
+  document.body.classList.remove('building');
+  document.body.classList.toggle('panel-hidden', painter.hidden);
+  canvas.style.cursor = '';
+  showGrid();
+  syncGizmo();
+  resize();
+  status('');
+}
+
+// how high the style's pieces are lifted so their floors stand on the grid: one height for the whole style (its
+// pieces share the game's heights, so they keep fitting each other), from a room's middle or corner piece
 async function liftPalette() {
   const style = painter.style;
   const ref = painter.pieces.find((o) => /room_?(center|middle)|_center|floor/i.test(o.id))
@@ -2873,32 +2930,21 @@ async function liftPalette() {
   const box = new THREE.Box3();
   for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
   painter.lift = Number.isFinite(box.min.z) ? -Math.round(box.min.z) : 0;
-  if (painter.point) painter.point[2] = painter.level + painter.lift;
-  moveGhost();
-}
-
-function closePainter() {
-  if (!painter.on) return;
-  endStroke();
-  painter.on = false;
-  painter.point = null;
-  setGhost(null);
-  document.body.classList.remove('painting', 'painter-big');
-  canvas.style.cursor = '';
-  showGrid();
-  syncGizmo();
-  status('');
+  painter.ghostKey = '';
+  setGhost(brush());
 }
 
 function filterPainter() {
-  const words = $('pt-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const words = $('rb-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const match = (text) => words.every((w) => text.toLowerCase().includes(w));
   const cur = painter.pieces[painter.at];
-  painter.pieces = painter.all.filter((o) => (!painter.style || styleOf(o) === painter.style)
-    && words.every((w) => (o.id + ' ' + (o.name || '')).toLowerCase().includes(w)));
+  const order = (o) => GROUP_ORDER.indexOf(pieceGroup(o));
+  painter.pieces = painter.all.filter((o) => (!painter.style || styleOf(o) === painter.style) && match(o.id + ' ' + (o.name || '')))
+    .sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
   painter.at = Math.max(0, painter.pieces.indexOf(cur));
-  $('pt-style-name').textContent = styleName(painter.style);
-  const strip = $('pt-strip');
-  strip.innerHTML = '';
+  $('rb-style-name').textContent = styleName(painter.style);
+  const box = $('rb-groups');
+  box.innerHTML = '';
   painter.thumbObserver?.disconnect();
   painter.thumbObserver = new IntersectionObserver((seen) => {
     for (const e of seen) {
@@ -2907,80 +2953,158 @@ function filterPainter() {
       const o = painter.pieces[+e.target.dataset.i];
       if (o) thumbPicture(o.mesh).then((pic) => { if (e.target.isConnected) putThumb(e.target.querySelector('.th'), pic); });
     }
-  }, { root: strip, rootMargin: '0px 400px' });
+  }, { root: $('panel'), rootMargin: '300px 0px' });
+  const section = (title, count) => {
+    const d = box.appendChild(document.createElement('details'));
+    d.className = 'fold rb-group';
+    d.open = true;
+    d.innerHTML = '<summary></summary><div class="rb-grid"></div>';
+    d.querySelector('summary').textContent = `${title} (${count})`;
+    return d.querySelector('.rb-grid');
+  };
+  const sets = painter.sets.filter((s) => match(s.name));
+  if (sets.length) {
+    const grid = section('Room sets', sets.length);
+    for (const s of sets) {
+      const cell = grid.appendChild(document.createElement('div'));
+      cell.className = 'rb-cell rb-set' + (painter.set === s ? ' sel' : '');
+      cell.title = `${s.name}: ${s.pieces.length} pieces`;
+      cell.innerHTML = `<div class="th">${icon('group')}<span>${s.pieces.length}</span></div><div class="cn"></div>`
+        + `<button class="ghost icon rb-del" title="Delete this set">${icon('x')}</button>`;
+      cell.querySelector('.cn').textContent = s.name;
+      cell.addEventListener('click', () => pickSet(s));
+      cell.querySelector('.rb-del').addEventListener('click', (e) => { e.stopPropagation(); deleteSet(s); });
+    }
+  }
+  let grid = null, last = null;
   painter.pieces.forEach((o, i) => {
-    const cell = strip.appendChild(document.createElement('div'));
-    cell.className = 'pt-cell';
+    const g = pieceGroup(o);
+    if (g !== last) { grid = section(g, painter.pieces.filter((p) => pieceGroup(p) === g).length); last = g; }
+    const cell = grid.appendChild(document.createElement('div'));
+    cell.className = 'rb-cell rb-piece';
     cell.dataset.i = i;
     cell.title = o.name && o.name !== o.id ? `${o.name} (${o.id})` : o.id;
     cell.innerHTML = '<div class="th"></div><div class="cn"></div>';
-    cell.querySelector('.cn').textContent = o.id.replace(/^(in|ex)_/i, '');
+    cell.querySelector('.cn').textContent = o.id.replace(/^(in|ex)_/i, '').replace(/^[a-z]+_/i, (m) => (painter.style ? '' : m));
     cell.addEventListener('click', () => pickPiece(i));
     painter.thumbObserver.observe(cell);
   });
-  $('pt-empty').style.display = painter.pieces.length ? 'none' : '';
-  pickPiece(painter.at);
+  if (!sets.length && !painter.pieces.length) box.innerHTML = '<div class="npc-hint rb-empty">Nothing matches.</div>';
+  if (painter.set && sets.includes(painter.set)) pickSet(painter.set); else pickPiece(painter.at);
+}
+
+function paintSelection() {
+  for (const c of $('rb-groups').querySelectorAll('.rb-cell')) {
+    c.classList.toggle('sel', painter.set ? c.classList.contains('rb-set') && c.title.startsWith(painter.set.name + ':')
+      : c.classList.contains('rb-piece') && +c.dataset.i === painter.at);
+  }
+  $('rb-groups').querySelector('.rb-cell.sel')?.scrollIntoView({ block: 'nearest' });
 }
 
 function pickPiece(i) {
-  if (!painter.pieces.length) { setGhost(null); paintInfo(); return; }
-  painter.at = (i + painter.pieces.length) % painter.pieces.length;
-  const cells = $('pt-strip').children;
-  for (const c of cells) c.classList.toggle('sel', +c.dataset.i === painter.at);
-  cells[painter.at]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  setGhost(painter.pieces[painter.at].mesh);
+  painter.set = null;
+  if (painter.pieces.length) painter.at = (i + painter.pieces.length) % painter.pieces.length;
+  paintSelection();
+  setGhost(brush());
   paintInfo();
 }
 
-function paintInfo() {
-  const o = painter.pieces[painter.at];
-  const deg = Math.round(((painter.yaw / DEG) % 360 + 360) % 360);
-  $('pt-info').textContent = o ? `${o.id} · facing ${deg}° · height ${painter.level}` : `height ${painter.level}`;
+function pickSet(s) {
+  painter.set = s;
+  paintSelection();
+  setGhost(brush());
+  paintInfo();
 }
 
-// the see-through piece where a click would put it
-async function setGhost(mesh) {
+// what a click puts down: pieces relative to the square's centre at the builder's height, unturned
+function brush() {
+  if (painter.set) {
+    const byId = new Map(painter.all.map((o) => [o.id.toLowerCase(), o]));
+    return { key: 'set:' + painter.set.name, items: painter.set.pieces.map((p) => {
+      const o = byId.get(p.id.toLowerCase()) || catalogData?.find((c) => c.id.toLowerCase() === p.id.toLowerCase());
+      return o && { o, rel: p.pos, rz: p.rz };
+    }).filter(Boolean) };
+  }
+  const o = painter.pieces[painter.at];
+  return o ? { key: 'piece:' + o.id + ':' + painter.lift, items: [{ o, rel: [0, 0, painter.lift], rz: 0 }] } : null;
+}
+
+function paintInfo() {
+  const b = painter.set ? painter.set.name : painter.pieces[painter.at]?.id || 'Nothing chosen';
+  const deg = Math.round(((painter.yaw / DEG) % 360 + 360) % 360);
+  $('rb-info').textContent = `${b} · facing ${deg}°`;
+  $('rb-level').textContent = String(painter.level);
+}
+
+// the see-through brush where a click would put it, and the outline of the ground it covers
+async function setGhost(b) {
   const token = ++painter.token;
-  if (painter.ghost && painter.ghostMesh !== mesh) {
+  const key = b ? b.key : '';
+  if (painter.ghost && painter.ghostKey !== key) {
     painter.ghost.parent?.remove(painter.ghost);
     painter.ghost.traverse((m) => { if (m.isMesh) m.material.dispose(); });
     painter.ghost = null;
   }
-  painter.ghostMesh = mesh || '';
-  if (!mesh || painter.ghost) { moveGhost(); return; }
-  const parts = await meshParts(mesh);
+  painter.ghostKey = key;
+  if (!b || painter.ghost) { moveGhost(); return; }
+  const parts = await Promise.all(b.items.map((it) => meshParts(it.o.mesh)));
   if (token !== painter.token || !painter.on) return;
   const g = new THREE.Group();
-  for (const p of parts) {
-    const m = new THREE.Mesh(p.geometry, p.material.clone());
-    Object.assign(m.material, { transparent: true, opacity: 0.55, depthWrite: false });
-    m.raycast = () => {};
-    g.add(m);
-  }
+  b.items.forEach((it, k) => {
+    const piece = new THREE.Group();
+    for (const p of parts[k]) {
+      const m = new THREE.Mesh(p.geometry, p.material.clone());
+      Object.assign(m.material, { transparent: true, opacity: 0.55, depthWrite: false });
+      m.raycast = () => {};
+      piece.add(m);
+    }
+    piece.matrixAutoUpdate = false;
+    piece.matrix.copy(refMatrix({ pos: it.rel, rot: [0, 0, it.rz], scale: 1 }));
+    g.add(piece);
+  });
   g.matrixAutoUpdate = false;
   painter.ghost = g;
-  world.add(g);
   moveGhost();
+}
+
+function brushMatrix() {
+  return refMatrix({ pos: painter.point, rot: [0, 0, painter.yaw], scale: 1 });
 }
 
 function moveGhost() {
   const g = painter.ghost;
-  if (!g) return;
+  if (painter.square) painter.square.visible = false;
+  if (!g) { requestRender(); return; }
   if (g.parent !== world) world.add(g);
   g.visible = !!painter.point;
   if (painter.point) {
-    g.matrix.copy(refMatrix({ pos: painter.point, rot: [0, 0, painter.yaw], scale: 1 }));
+    g.matrix.copy(brushMatrix());
     g.matrixWorldNeedsUpdate = true;
+    g.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(g);
+    if (!box.isEmpty()) {
+      if (!painter.square) {
+        painter.square = new THREE.LineLoop(new THREE.BufferGeometry(),
+          new THREE.LineBasicMaterial({ color: 0xffd36a, transparent: true, opacity: 0.9, depthTest: false }));
+        painter.square.renderOrder = 10;
+        painter.square.raycast = () => {};
+      }
+      if (painter.square.parent !== world) world.add(painter.square);
+      const z = painter.level + 1;
+      painter.square.geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+        box.min.x, box.min.y, z, box.max.x, box.min.y, z, box.max.x, box.max.y, z, box.min.x, box.max.y, z], 3));
+      painter.square.visible = true;
+    }
   }
   requestRender();
 }
 
-// the grid square under the pointer, at the painter's height
+// the grid square under the pointer, at the builder's height
 function paintPoint(x, y) {
   raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
   const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -painter.level), new THREE.Vector3());
   if (!p || p.distanceTo(camera.position) > 20000) return null;
-  return [toStep(p.x, grid.step), toStep(p.y, grid.step), painter.level + painter.lift];
+  return [toStep(p.x, grid.step), toStep(p.y, grid.step), painter.level];
 }
 
 function paintHover(e) {
@@ -2989,29 +3113,40 @@ function paintHover(e) {
   if (painter.stroke && painter.point) paintHere();
 }
 
-// put the piece where the ghost is (once per square in a stroke, and not on the same piece)
-async function paintHere() {
-  const o = painter.pieces[painter.at];
-  const pos = painter.point;
-  if (!o || !pos) return;
-  const sq = `${pos.join(',')},${painter.yaw.toFixed(3)}`;
-  if (painter.stroke.done.has(sq)) return;
-  painter.stroke.done.add(sq);
-  const same = state.edits.added.some((a) => a.cell === state.cell.name && a.id === o.id && !state.edits.deleted.includes('added|' + a.uid)
-    && a.pos.every((v, i) => Math.abs(v - pos[i]) < 0.5) && Math.cos(a.rot[2] - painter.yaw) > 0.9999);
-  if (same) return;
+// add one object, as Add object does
+async function addPiece(o, pos, rot) {
   const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const tag = state.newTag || null;
-  const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: 'mesh', mesh: o.mesh, pos: [...pos], rot: [0, 0, painter.yaw], scale: 1,
+  const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: 'mesh', mesh: o.mesh, pos, rot, scale: 1,
               editable: true, origin: 'added', structure: false, tag, ...typeFlags(o.type) };
   r.orig = { pos: [...r.pos], rot: [...r.rot] };
-  state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...r.pos], rot: [...r.rot], scale: 1, tag });
+  state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...pos], rot: [...rot], scale: 1, tag });
   state.cell.refs.push(r);
   const obj = await makeObject(r);
   world.add(obj);
   objByKey.set(r.key, obj);
   state.undo.push({ obj, added: uid });
-  painter.stroke.count++;
+}
+
+// put the brush where the ghost is (once per square in a stroke, and not on the same pieces)
+async function paintHere() {
+  const b = brush();
+  if (!b || !b.items.length || !painter.point) return;
+  const sq = `${painter.point.join(',')},${painter.yaw.toFixed(3)}`;
+  if (painter.stroke.done.has(sq)) return;
+  painter.stroke.done.add(sq);
+  const m = brushMatrix();
+  const gone = new Set(state.edits.deleted);
+  for (const it of b.items) {
+    const w = m.clone().multiply(refMatrix({ pos: it.rel, rot: [0, 0, it.rz], scale: 1 }));
+    const pos = new THREE.Vector3().setFromMatrixPosition(w).toArray().map((v) => Math.round(v * 100) / 100);
+    const rot = rotOf(w);
+    const same = state.edits.added.some((a) => a.cell === state.cell.name && a.id === it.o.id && !gone.has('added|' + a.uid)
+      && a.pos.every((v, i) => Math.abs(v - pos[i]) < 0.5) && Math.cos(a.rot[2] - rot[2]) > 0.9999);
+    if (same) continue;
+    await addPiece(it.o, pos, rot);
+    painter.stroke.count++;
+  }
   refreshVisibility();
   updateDirty();
 }
@@ -3027,9 +3162,9 @@ function endStroke() {
   painter.stroke = null;
   if (s.count > 1) {
     joinSteps(s.from, s.before);
-    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = `painted ${s.count} pieces`;
+    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = `built ${s.count} pieces`;
   }
-  if (s.count) status(`Placed ${s.count === 1 ? painter.pieces[painter.at]?.id : `${s.count} pieces`}.`);
+  if (s.count) status(`Placed ${s.count === 1 ? brush()?.items[0]?.o.id : `${s.count} pieces`}.`);
   updateDirty();
 }
 
@@ -3050,34 +3185,72 @@ function paintErase(x, y) {
 function paintTurn(sign) { painter.yaw = wrapAngle(painter.yaw + sign * Math.PI / 2); paintInfo(); moveGhost(); }
 function paintLevel(sign) {
   painter.level += sign * GRID_Z;
-  if (painter.point) painter.point[2] = painter.level + painter.lift;
+  if (painter.point) painter.point[2] = painter.level;
   paintInfo();
   moveGhost();
   levelGrid(true);
 }
 
+// Save as a room set: the selected objects, relative to the grid square at the middle of their footing and the
+// height they stand on, so a set stands on the grid as pieces do
+async function saveRoomSet() {
+  const objs = state.selection.filter((o) => o.visible && o.userData.ref.mesh);
+  if (!objs.length) return;
+  const box = boxOf(objs);
+  const c = box.getCenter(new THREE.Vector3());
+  const ox = toStep(c.x, grid.step), oy = toStep(c.y, grid.step), oz = Math.round(box.min.z);
+  const name = await askText('Save as a room set', 'A name for the set, e.g. Hlaalu chapel',
+                             objs.length === 1 ? objs[0].userData.ref.src : '');
+  if (!name) return;
+  const pieces = objs.map((o) => {
+    const r = o.userData.ref;
+    return { id: r.src, pos: [r.pos[0] - ox, r.pos[1] - oy, r.pos[2] - oz].map((v) => Math.round(v * 100) / 100),
+             rz: Math.round(r.rot[2] * 1e5) / 1e5 };
+  });
+  const sets = (await roomSets()).filter((s) => s.name !== name);
+  painter.sets = await roomSets([...sets, { name, pieces }].sort((a, b) => a.name.localeCompare(b.name)));
+  status(`Saved the room set ${name} (${pieces.length} pieces): it's in the room builder.`);
+  if (painter.on) filterPainter();
+}
+
+async function deleteSet(s) {
+  painter.sets = await roomSets(painter.sets.filter((x) => x.name !== s.name));
+  if (painter.set?.name === s.name) painter.set = null;
+  status(`Deleted the room set ${s.name}.`);
+  filterPainter();
+}
+
+function askText(title, placeholder, value = '') {
+  return new Promise((resolve) => {
+    const bg = document.createElement('div');
+    bg.className = 'dialog-bg';
+    bg.innerHTML = '<div class="dialog ask-dialog"><h3></h3><input type="text" maxlength="60">'
+      + '<div class="bar"><button class="as-cancel">Cancel</button><button class="primary as-ok">Save</button></div></div>';
+    document.body.appendChild(bg);
+    bg.querySelector('h3').textContent = title;
+    const i = bg.querySelector('input');
+    i.placeholder = placeholder;
+    i.value = value;
+    const done = (v) => { bg.remove(); resolve(v); resumeFlySoon(); };
+    bg.querySelector('.as-cancel').addEventListener('click', () => done(null));
+    bg.querySelector('.as-ok').addEventListener('click', () => done(i.value.trim() || null));
+    bg.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(null); } else if (e.key === 'Enter') done(i.value.trim() || null);
+    });
+    i.focus();
+    i.select();
+  });
+}
+
 $('paint-rooms').addEventListener('click', () => openPainter());
-$('pt-style').addEventListener('click', () => openPainter());
-$('pt-done').addEventListener('click', closePainter);
-$('pt-left').addEventListener('click', () => paintTurn(-1));
-$('pt-right').addEventListener('click', () => paintTurn(1));
-$('pt-up').addEventListener('click', () => paintLevel(1));
-$('pt-down').addEventListener('click', () => paintLevel(-1));
-$('pt-prev').addEventListener('click', () => { $('pt-strip').scrollBy({ left: -$('pt-strip').clientWidth * 0.8, behavior: 'smooth' }); });
-$('pt-next').addEventListener('click', () => { $('pt-strip').scrollBy({ left: $('pt-strip').clientWidth * 0.8, behavior: 'smooth' }); });
-$('pt-big').addEventListener('click', () => {
-  document.body.classList.toggle('painter-big');
-  $('pt-big').title = document.body.classList.contains('painter-big') ? 'Back to one row' : 'Show all the pieces';
-  pickPiece(painter.at);
-});
-$('pt-search').addEventListener('input', filterPainter);
-$('pt-search').addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter') e.target.blur(); });
-// the wheel over the bar's row scrolls it sideways
-$('pt-strip').addEventListener('wheel', (e) => {
-  if (document.body.classList.contains('painter-big') || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-  e.preventDefault();
-  $('pt-strip').scrollLeft += e.deltaY;
-}, { passive: false });
+$('rb-style').addEventListener('click', changeStyle);
+$('rb-done').addEventListener('click', closePainter);
+$('rb-left').addEventListener('click', () => paintTurn(-1));
+$('rb-right').addEventListener('click', () => paintTurn(1));
+$('rb-up').addEventListener('click', () => paintLevel(1));
+$('rb-down').addEventListener('click', () => paintLevel(-1));
+$('rb-search').addEventListener('input', filterPainter);
+$('rb-search').addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter') e.target.blur(); });
 
 // Add object…: choose the object, then where it goes.
 function addObject() {
@@ -3242,6 +3415,9 @@ function openMenuAt(x, y, own = null, before = []) {
           else item(`Can't attach: ${why}`, null);
         }
       }
+      if (!TOUCH && state.selection.some((o) => o.userData.ref.mesh)) {
+        item(state.selection.length > 1 ? `Save ${state.selection.length} as a room set…` : 'Save as a room set…', saveRoomSet);
+      }
       item('Focus selection', lookAtSelected);
     }
   }
@@ -3249,7 +3425,7 @@ function openMenuAt(x, y, own = null, before = []) {
     if (target) m.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
     item('Add object here…', () => addAt(hit));
     item('Add NPC here…', () => addAt(hit, 'npc'));
-    if (!TOUCH) item('Room painter here…', () => openPainter(hit.point.z));
+    if (!TOUCH) item('Room builder here…', () => openPainter(hit.point.z));
   }
   showAddMarker(hit);
   m.classList.add('open');
@@ -3660,7 +3836,7 @@ canvas.addEventListener('wheel', (e) => {
   if (painter.on && !e.shiftKey) {
     // the wheel picks the piece (Shift and the wheel move the camera); a trackpad's small scrolls add up
     painter.wheel += e.deltaMode ? e.deltaY * 40 : e.deltaY;
-    if (Math.abs(painter.wheel) >= 60) { pickPiece(painter.at + Math.sign(painter.wheel)); painter.wheel = 0; }
+    if (Math.abs(painter.wheel) >= 60) { pickPiece(painter.set ? 0 : painter.at + Math.sign(painter.wheel)); painter.wheel = 0; }
     return;
   }
   const notches = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY * 10 : e.deltaY / 100;
@@ -3701,7 +3877,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 'z' || k === 'x') { paintTurn(k === 'z' ? -1 : 1); return; }
     if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); paintLevel(e.key === 'PageUp' ? 1 : -1); return; }
     if (k === 'escape') { closePainter(); return; }
-    if (k === '[' || k === ']') { pickPiece(painter.at + (k === '[' ? -1 : 1)); return; }
+    if (k === '[' || k === ']') { pickPiece(painter.set ? 0 : painter.at + (k === '[' ? -1 : 1)); return; }
   }
   state.keys.add(e.code);
   const step = { ArrowUp: [1, 0, 0], ArrowDown: [-1, 0, 0], ArrowRight: [0, 1, 0], ArrowLeft: [0, -1, 0],

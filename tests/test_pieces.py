@@ -32,3 +32,18 @@ class Find(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoomSets(unittest.TestCase):
+    def test_cleaned_and_kept(self):
+        from celleditor import server
+        old = server.SETTINGS
+        server.SETTINGS = None
+        try:
+            got = server.room_sets([{"name": " Chapel ", "pieces": [{"id": "in_x_room_corner", "pos": [1.234, 2, 3], "rz": 1.5707964},
+                                                                    {"id": "", "pos": [0, 0, 0]}]},
+                                    {"name": "", "pieces": [{"id": "a", "pos": [0, 0, 0]}]}])
+            self.assertEqual(got, [{"name": "Chapel", "pieces": [{"id": "in_x_room_corner", "pos": [1.23, 2.0, 3.0], "rz": 1.5708}]}])
+            self.assertEqual(server.room_sets(), got)
+        finally:
+            server.SETTINGS = old

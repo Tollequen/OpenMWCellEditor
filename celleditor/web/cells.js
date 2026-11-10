@@ -129,7 +129,17 @@ function open(old) {
     build();
   };
   build();
-  if (!old) q('.cl-note').textContent = 'After Create you\'re taken there: an empty cell with a floor grid to build on.';
+  if (!old) {
+    q('.cl-note').textContent = 'After Create you\'re taken there: an empty cell with a floor grid to build on.';
+    const l = el('label', 'check cl-build');
+    const b = l.appendChild(el('input'));
+    b.type = 'checkbox';
+    b.checked = !document.body.classList.contains('touch');
+    b.addEventListener('change', () => { f.build = b.checked; });
+    f.build = b.checked;
+    l.append(' Open the room builder there');
+    q('.bar').prepend(l);
+  }
 
   const out = () => Object.assign({ new: true }, Object.fromEntries(FIELDS.map((k) => [k, f[k]])), { name: f.name.trim() });
   bg.addEventListener('keydown', (e) => {
@@ -151,7 +161,8 @@ function open(old) {
     if (got.error) { note(got.error); return; }
     close();
     record((e) => { e.cells[c.name.toLowerCase()] = c; }, `Made ${c.name}.`);
-    api.go(c.name);
+    const build = f.build;
+    Promise.resolve(api.go(c.name)).then(() => { if (build) api.build(); });
   });
   let sure = false;
   q('.cl-delete').addEventListener('click', () => {
