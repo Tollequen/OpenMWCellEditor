@@ -45,6 +45,13 @@
   .menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 7px 10px; }
   .menu button:hover { background: var(--panel-2); }
   .menu button span { display: block; color: var(--dim); font-size: 12px; }
+  .cell-row { display: flex; gap: 6px; }
+  .cell-row #cell-btn { flex: 1; min-width: 0; width: auto; }
+  .dialog.cell-dialog { width: min(460px, 100%); }
+  .cl-form label.opt > span { flex: none; width: 130px; color: var(--dim); font-size: 12px; }
+  .cl-form label.opt > input[type=text], .cl-form label.opt > input[type=number], .cl-form label.opt > .pick-wrap { flex: 1; min-width: 0; width: auto; }
+  .cl-form label.opt > input[type=color] { width: 64px; height: 26px; padding: 1px; margin-right: auto; }
+  .cell-dialog .bar .spacer { flex: 1; }
   #cell-btn { width: 100%; justify-content: flex-start; gap: 7px; background: var(--field); padding: 6px 8px; }
   #cell-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
   #cell-btn svg { color: var(--dim); }
@@ -116,6 +123,22 @@
   .dialog.choose-dialog { width: min(560px, 100%); display: flex; flex-direction: column; gap: 6px; }
   .choose-dialog .ch-list { flex: none; height: min(440px, 55vh); }
   .choose-dialog .bar .spacer { flex: 1; }
+  .dialog.choose-dialog.with-detail { width: min(820px, 100%); }
+  .ch-main { display: flex; gap: 8px; min-height: 0; }
+  .ch-main .ch-list { flex: 1; min-width: 0; }
+  .ch-detail { flex: none; width: 250px; box-sizing: border-box; padding: 8px 10px; overflow: auto; border: 1px solid var(--line-soft);
+               border-radius: var(--radius); background: var(--field); height: min(440px, 55vh); overflow-wrap: anywhere; }
+  .ch-d-name { font-weight: 600; }
+  .ch-d-type { color: var(--dim); font-size: 12px; margin-bottom: 8px; }
+  .ch-d-line { margin: 3px 0; }
+  .it-effects { white-space: pre-line; margin: 0 0 4px 138px; }
+  .it-effects:empty { display: none; }
+  @media (max-width: 700px) {
+    .ch-main { flex-direction: column; }
+    .ch-main .ch-list { flex: none; height: min(300px, 40vh); }
+    .ch-detail { width: auto; height: auto; max-height: 24vh; }
+    .it-effects { margin-left: 104px; }
+  }
   .npc-line .pick-btn, .npc-add .pick-btn { padding: 2px 4px; }
   .own-dialog .ow-lock { border-top: 1px solid var(--line-soft); margin-top: 10px; padding-top: 6px; }
   #own-info { color: var(--dim); font-size: 12px; margin: 6px 0 4px; }
@@ -301,10 +324,14 @@
   #quick-acts { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3; display: none;
                 align-items: center; gap: 6px; padding: 4px 4px 4px 12px; background: var(--float);
                 border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow);
-                max-width: min(600px, calc(100vw - var(--pw) - 300px)); box-sizing: border-box; }
+                max-width: min(820px, calc(100vw - var(--pw) - 300px)); box-sizing: border-box; }
   #quick-acts.open { display: flex; }
   #qa-name { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: 4px; }
   #quick-acts button { flex: none; }
+  #qa-snaps { display: flex; gap: 4px; flex: none; }
+  #qa-snaps:not(:first-child) { padding-left: 6px; border-left: 1px solid var(--line-soft); }
+  #quick-acts .qa-toggle { color: var(--dim); }
+  #quick-acts .qa-toggle.on { color: var(--text); }
   body.docked:not(.touch):not(.panel-hidden) #quick-acts { left: calc(50% + var(--pw) / 2); }
   body.mouse-look #quick-acts, body:has(.banner.open, #dest-banner.open) #quick-acts { display: none; }
   #mouselook kbd { font-size: 11px; padding: 1px 4px; }
@@ -681,6 +708,7 @@
   <button id="qa-contents" title="What's inside"><i data-icon="chest"></i>Contents…</button>
   <button id="qa-own" title="Who owns it, and its lock and trap"><i data-icon="lock"></i>Owner and lock…</button>
   <button id="qa-item" title="Its name, model, icon and stats"><i data-icon="sliders"></i>Edit item…</button>
+  <span id="qa-snaps"><button id="qa-grid" class="qa-toggle" aria-pressed="false"><i data-icon="grid"></i>Snap to grid</button><button id="qa-steps" class="qa-toggle" aria-pressed="false"><i data-icon="steps"></i>Snap to steps</button></span>
 </div>
 <button id="mouselook" class="desktop-only" title="Fly mode: look around with the mouse (Tab)"><i data-icon="crosshair"></i>Fly mode <kbd>Tab</kbd></button>
 <div id="look-keys" aria-label="Keys">
@@ -716,7 +744,8 @@
     </div>
   </div>
   <div class="psec">
-    <button id="cell-btn" title="Choose a cell"><i data-icon="pin"></i><span id="cell-name">…</span><i data-icon="chevDown"></i></button>
+    <div class="cell-row"><button id="cell-btn" title="Choose a cell"><i data-icon="pin"></i><span id="cell-name">…</span><i data-icon="chevDown"></i></button>
+      <button id="cell-edit" class="icon" title="This cell's light and water (a cell made in this project)" style="display:none"><i data-icon="sliders"></i></button></div>
     <div id="others" style="display:none"></div>
   </div>
   <div class="psec n-only" id="n-bar"><span id="n-bar-l" class="n-grp"></span><span class="spacer"></span><span id="n-bar-r"></span></div>
@@ -730,6 +759,7 @@
     <button id="redo" class="icon" title="Redo (Ctrl/Cmd+Shift+Z)" disabled><i data-icon="redo"></i></button>
     <button id="save" class="icon" title="Save (Ctrl/Cmd+S)"><i data-icon="save"></i><span class="n-lbl">Save</span></button>
     <div class="toolrow"><button id="lock-btn" class="on">Lock walls</button><button id="light-btn" aria-pressed="false">Simulate lighting</button></div>
+    <div class="toolrow"><button id="grid-btn" aria-pressed="false">Floor grid</button></div>
     <div class="toolrow"><button id="owned-btn" aria-pressed="false" title="Red boxes around the objects someone owns (taking them is stealing)">Show owned</button></div>
     <input type="checkbox" id="lock" checked hidden>
   </div>
@@ -783,7 +813,7 @@
     <div class="pair">
       <button id="add" title="Or right-click a surface"><i data-icon="plus"></i>Add object…</button>
       <button id="add-npc" title="A new NPC: name them, then click where they should stand (or right-click a surface)"><i data-icon="person"></i>Add NPC…</button>
-      <button id="add-item" title="A new weapon, armour, clothing, misc item or book, made from scratch"><i data-icon="sliders"></i>New item…</button>
+      <button id="add-item" title="Make a new weapon, armour, clothing, misc item or book. To place an existing one, use Add object"><i data-icon="sword"></i>New item…</button>
     </div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
   </div>
@@ -797,6 +827,7 @@
       <label class="opt">Fly speed <input type="number" id="fly-speed" min="10" max="10000" step="10"></label>
       <label class="opt">Move step <select id="move-step"></select></label>
       <label class="opt">Rotate step <select id="rot-step"></select></label>
+      <label class="opt" title="The squares of the floor grid, and the steps room pieces snap to">Grid squares <select id="grid-step"></select></label>
       <label class="opt">Look sensitivity <input type="number" id="sensitivity" min="0.1" max="20" step="0.1"></label>
     </div>
   </details>
@@ -853,6 +884,8 @@
     <input id="pk-search" type="search" placeholder="Search by name or id, e.g. chair, crate, torch…" autocomplete="off">
     <div class="pk-row">
       <label><span id="pk-type-label">Type</span> <select id="pk-type"><option value="">All</option></select></label>
+      <button id="pk-new-cell" title="Make a new, empty interior cell in your plugin" style="display:none"><i data-icon="plus"></i>New cell…</button>
+      <button id="pk-new-item" title="Make a new weapon, armour, clothing, misc item or book, from scratch or from an existing one" style="display:none"><i data-icon="sword"></i>New item…</button>
       <span id="pk-views" class="pk-views"><button id="pk-view-list" class="icon" title="Show as a list"><i data-icon="list"></i></button><button id="pk-view-grid" class="icon" title="Show the models"><i data-icon="grid"></i></button></span>
     </div>
     <label id="pk-attach-row" class="check" style="display:none"><input type="checkbox" id="pk-attach" checked> <span id="pk-attach-label">Attach to the object below</span></label>
@@ -938,6 +971,8 @@
       <button id="tb-own" class="icon tb-normal" title="Owner and lock" style="display:none"><i data-icon="lock"></i></button>
       <button id="tb-item" class="icon tb-normal" title="Edit item" style="display:none"><i data-icon="sliders"></i></button>
       <span id="tb-name">Tap an object</span>
+      <button id="tb-snapgrid" class="icon tb-normal" aria-pressed="false" style="display:none"><i data-icon="grid"></i></button>
+      <button id="tb-snapsteps" class="icon tb-normal" aria-pressed="false" style="display:none"><i data-icon="steps"></i></button>
       <button id="tb-move" class="icon on tb-normal" title="Move"><i data-icon="move"></i></button>
       <button id="tb-turn" class="icon tb-normal" title="Rotate"><i data-icon="rotate"></i></button>
       <button id="tb-scale" class="icon tb-normal" title="Scale"><i data-icon="scale"></i></button>

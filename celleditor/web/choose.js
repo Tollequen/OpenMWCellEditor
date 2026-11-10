@@ -32,21 +32,33 @@ function iconEl(name) {
   return img;
 }
 
-// items: [{id, name, type, icon, note}]; resolves to the id picked, '' for none, or null when cancelled
+// items: [{id, name, type, icon, note, detail}] (detail: lines shown beside the list for the one picked); resolves to the id picked, '' for none, or null when cancelled
 export function choose({ title, items, current = '', none = null, type = '' }) {
   return new Promise((resolve) => {
     const icons = items.some((o) => o.icon);
     const types = [...new Set(items.map((o) => o.type).filter(Boolean))].sort();
     const bg = el('div', 'dialog-bg');
     bg.innerHTML = `<div class="dialog choose-dialog"><h3></h3>
-      <div class="wr-filters"><input type="search" class="ch-search" placeholder="Search by name or id"><select class="ch-type"></select>
+      <div class="wr-filters"><input type="search" class="ch-search"><select class="ch-type"></select>
         <span class="wr-views"><button class="icon ch-as-list" title="Show as a list">${icon('list')}</button><button class="icon ch-as-grid" title="Show as icons">${icon('grid')}</button></span></div>
-      <div class="wr-list ch-list" tabindex="0"></div><div class="npc-hint ch-more"></div>
+      <div class="ch-main"><div class="wr-list ch-list" tabindex="0"></div><div class="ch-detail"></div></div><div class="npc-hint ch-more"></div>
       <div class="bar"><button class="ch-none"></button><span class="spacer"></span><button class="ch-cancel">Cancel</button><button class="primary ch-ok">Choose</button></div></div>`;
     document.body.appendChild(bg);
     const q = (c) => bg.querySelector(c);
     q('h3').textContent = title;
+    q('.ch-search').placeholder = items.some((o) => o.detail) ? 'Search by name, id or effect' : 'Search by name or id';
     const search = q('.ch-search'), filter = q('.ch-type'), list = q('.ch-list');
+    const details = items.some((o) => o.detail);
+    q('.dialog').classList.toggle('with-detail', details);
+    q('.ch-detail').style.display = details ? '' : 'none';
+    const showDetail = (o) => {
+      const box = q('.ch-detail');
+      box.innerHTML = '';
+      if (!details || !o) return;
+      box.appendChild(el('div', 'ch-d-name', o.name || o.id));
+      if (o.type) box.appendChild(el('div', 'ch-d-type', o.type));
+      for (const line of o.detail || []) box.appendChild(el('div', 'ch-d-line', line));
+    };
     filter.add(new Option('All', ''));
     for (const t of types) filter.add(new Option(t, t));
     filter.value = types.includes(type) ? type : '';
@@ -73,13 +85,15 @@ export function choose({ title, items, current = '', none = null, type = '' }) {
       view.sel = Math.max(0, Math.min(view.rows.length - 1, k));
       list.querySelectorAll('.wr-row').forEach((row, i) => row.classList.toggle('sel', i === view.sel));
       list.children[view.sel]?.scrollIntoView({ block: 'nearest' });
+      showDetail(view.rows[view.sel]);
     };
     const ok = () => { const o = view.rows[view.sel]; if (o) done(o.id); };
     const render = () => {
       const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
       const want = filter.value;
       const found = items.filter((o) => (!want || o.type === want)
-        && words.every((w) => o.id.toLowerCase().includes(w) || (o.name || '').toLowerCase().includes(w)))
+        && words.every((w) => o.id.toLowerCase().includes(w) || (o.name || '').toLowerCase().includes(w)
+                                || (o.detail || []).some((d) => d.toLowerCase().includes(w))))
         .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
       view.rows = found.slice(0, MAX);
       q('.ch-more').textContent = found.length > MAX ? `${found.length - MAX} more: search to narrow it down.`

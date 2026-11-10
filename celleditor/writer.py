@@ -127,7 +127,7 @@ def encode_refs(refs, refnums):
 
 def empty_edits():
     return {"moved": {}, "deleted": [], "replaced": {}, "added": [], "attached": {}, "doors": {}, "groups": {},
-            "npcs": {}, "dialogue": {}, "props": {}, "containers": {}, "items": {}}
+            "npcs": {}, "dialogue": {}, "props": {}, "containers": {}, "items": {}, "cells": {}}
 
 
 def dest_of(subs):
@@ -362,14 +362,15 @@ def temp_marked(entries, persistent):
 
 
 def edited_cell_records(cells, vanilla, master, refnums, names=None, head_of=None, master_index=None,
-                        persistent=None):
-    """CELL records for the master's cells: header, new references and overrides."""
+                        persistent=None, always=()):
+    """CELL records for the master's cells: header, new references and overrides; always: cells written even
+    when empty."""
     records, count = [], 0
     for name in (sorted(cells) if names is None else names):
         refs = cells.get(name, [])
         overrides = [encode_vanilla_override(r, master_index(r) if master_index else 0)
                      for r in vanilla.get(name, []) if r["changed"]]
-        if not refs and not overrides:
+        if not refs and not overrides and name not in always:
             continue
         head = [sub(s_, v) for s_, v in (head_of(name) if head_of else cell_refs(master, name)[0])]
         entries = encode_refs(refs, refnums) + overrides
@@ -402,8 +403,9 @@ def _entry_bytes(num, subs):
 
 
 def rewrite_plugin(base, cells, vanilla, refnums, masters, cell_key, key_of, head_of, master_index, objects=None,
-                   dialogue=None, persistent=None):
-    """An existing plugin with the edits written into it; other records stay as they were."""
+                   dialogue=None, persistent=None, always=()):
+    """An existing plugin with the edits written into it; other records stay as they were (always: cells written
+    even when empty)."""
     with open(base, "rb") as f:
         data = f.read()
     records = list(_raw_records(data))
@@ -495,6 +497,8 @@ def rewrite_plugin(base, cells, vanilla, refnums, masters, cell_key, key_of, hea
         if refs:
             adds.setdefault(cell, []).extend(encode_refs(refs, refnums))
             count += len(refs)
+    for cell in always:
+        adds.setdefault(cell, [])
 
     body, written, done = [], 0, set()
     by_lower = {c.lower(): c for c in adds}
@@ -513,7 +517,7 @@ def rewrite_plugin(base, cells, vanilla, refnums, masters, cell_key, key_of, hea
         body.append(record("CELL", [sub(s_, v) for s_, v in head]
                            + (temp_marked(entries, persistent) if persistent else entries), flags))
     for cell, refs in adds.items():
-        if cell.lower() not in done and refs:
+        if cell.lower() not in done and (refs or cell in always):
             written += 1
             body.append(record("CELL", [sub(s_, v) for s_, v in head_of(cell)]
                                + (temp_marked(refs, persistent) if persistent else refs)))

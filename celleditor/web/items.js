@@ -189,10 +189,11 @@ async function itemInfo(id) {
   return res.json();
 }
 
-async function create() {
+// place: what Create does with the new item (default: the click that puts it in the cell)
+async function create(place = null) {
   try { await itemLists(); } catch (err) { api.status('The lists didn\'t load.', true); return; }
   open({ new: true, kind: 'MISC', id: '', name: '', model: '', icon: '', script: '', enchant: '', weight: 1, value: 1,
-         enchant_pts: 0, mflags: 0, own: true, canEdit: true }, null);
+         enchant_pts: 0, mflags: 0, own: true, canEdit: true }, null, place);
 }
 
 async function edit(r) {
@@ -210,7 +211,7 @@ const DEFAULTS = {
   BOOK: { scroll: 0, skill: -1, text: '' },
 };
 
-function open(info, r) {
+function open(info, r, place = null) {
   const f = JSON.parse(JSON.stringify(info));
   const isNew = !!info.new && !r;
   const editable = isNew || ((info.canEdit || (info.canCopy && !info.own)) && r?.editable);
@@ -230,7 +231,7 @@ function open(info, r) {
   const form = q('.it-form');
   const close = () => { view.dispose(); bg.remove(); };
   q('.it-title').textContent = isNew ? 'New item' : `${info.name || info.id}`;
-  q('.it-sub').textContent = isNew ? 'Made from scratch in your plugin.' : [info.id, KINDS[info.kind], info.file ? `from ${info.file}` : 'new',
+  q('.it-sub').textContent = isNew ? 'A new item in your plugin.' : [info.id, KINDS[info.kind], info.file ? `from ${info.file}` : 'new',
     !editable ? 'read-only in this project' : copyOnly ? 'changes make a copy for this one' : ''].filter(Boolean).join(' · ');
 
   const showIcon = () => {
@@ -350,8 +351,16 @@ function open(info, r) {
     text('script', 'Script', { placeholder: 'None', list: 'item-scripts', pick: (cur) => choose({
       title: 'Choose a script', items: listData.scripts.map((s) => ({ id: s })), current: cur, none: 'No script' }) });
     if (f.kind !== 'MISC') {
-      text('enchant', 'Enchantment', { placeholder: 'None', pick: (cur) => choose({
-        title: 'Choose an enchantment', items: listData.enchants, current: cur, none: 'No enchantment' }) });
+      const about = el('div', 'npc-hint it-effects');
+      const showEffects = () => {
+        const e = f.enchant && listData.enchants.find((x) => x.id.toLowerCase() === f.enchant.toLowerCase());
+        about.textContent = e ? enchantLines(e).join('\n') : f.enchant ? 'No enchantment has this id.' : '';
+      };
+      text('enchant', 'Enchantment', { placeholder: 'None', after: showEffects, pick: (cur) => choose({
+        title: 'Choose an enchantment', current: cur, none: 'No enchantment',
+        items: listData.enchants.map((e) => ({ id: e.id, type: e.type, note: (e.effects || []).join(', '), detail: enchantLines(e).slice(1) })) }) });
+      form.appendChild(about);
+      showEffects();
     }
     if (f.kind === 'WEAP') {
       choice('wtype', 'Type', WEAPON_TYPES);
@@ -426,7 +435,7 @@ function open(info, r) {
   build();
   view.show(f.model);
   showIcon();
-  q('.it-note').textContent = isNew ? 'After Create, click where to put it (or press Escape to only keep it for inventories and chests).' : '';
+  q('.it-note').textContent = isNew && place ? 'Create adds it as the object you were adding.' : isNew ? 'After Create, click where to put it (or press Escape to only keep it for inventories and chests).' : '';
 
   bg.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('.files-dialog')) { e.stopPropagation(); close(); } });
   q('.it-cancel').addEventListener('click', close);
@@ -440,7 +449,7 @@ function open(info, r) {
       out.id = (await res.json()).id;
       close();
       record(null, { ...out, new: true });
-      api.place({ id: out.id, name: out.name, type: KINDS[out.kind], mesh: out.model });
+      (place || api.place)({ id: out.id, name: out.name, type: KINDS[out.kind], mesh: out.model });
       return;
     }
     const before = JSON.stringify(clean(info));
@@ -461,6 +470,9 @@ function open(info, r) {
     }
   });
 }
+
+// an enchantment as an item's tooltip tells it: how it's cast, its effects, its charge
+const enchantLines = (e) => [e.type, ...(e.effects || []), ...(e.charge != null ? [`Charge: ${e.charge}`] : [])];
 
 // the item's fields as they're stored (the editor's helpers left out)
 function clean(f) {

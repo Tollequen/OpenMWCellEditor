@@ -10,7 +10,7 @@ import struct
 import sys
 from contextlib import redirect_stdout
 
-from . import containers, items, dialogue as dial, esp, launcher, loadorder, models, npc, writer
+from . import cells as cells_, containers, items, dialogue as dial, esp, launcher, loadorder, models, npc, writer
 
 DEFAULTS = {
     "name": None,
@@ -113,7 +113,53 @@ class Project:
         files = self.usable_files()
         if files is None or cell in self.own_cells or (self.in_place and esp.parse_exterior(cell)):
             return True
+        if cell in self.new_cells():
+            return True
         return self.load.has_cell(cell, among=files)
+
+    # --- New cells ----------------------------------------------------------------
+
+    def new_cells(self):
+        """{name: entry} of the edits' new interior cells."""
+        return cells_.new_cells(self.load_edits())
+
+    def check_new_cells(self):
+        """Raise ValueError if a new cell can't be written."""
+        taken = list(self.load.cells()[0]) + [c for c in self.own_cells if not esp.parse_exterior(c)]
+        seen = set()
+        for key, c in sorted((self.load_edits().get("cells") or {}).items()):
+            if not c.get("new"):
+                raise ValueError("The cell %s isn't a new one: its settings can't be changed." % key)
+            why = cells_.name_error(c.get("name") or "", taken)
+            if why is None and (c["name"].lower() != key or key in seen):
+                why = "The new cell %s is stored under another name." % c["name"]
+            if why:
+                raise ValueError(why)
+            seen.add(key)
+
+    def gather_all(self, extra_cells=()):
+        """gather(), and the new cells with the objects added to them."""
+        cells, vanilla, keys = self.gather(extra_cells)
+        new = {name: [] for name in self.new_cells() if name not in cells}
+        if new:
+            keys |= writer.apply_edits(new, {}, self.load_edits(), self.added_id, self.replaced_id)
+            cells.update(new)
+        return cells, vanilla, keys
+
+    def _head_of(self, masters):
+        """A cell's header for the plugin: a new cell's own, the load order's, or a bare exterior's."""
+        new = self.new_cells()
+
+        def head_of(cell):
+            if cell in new:
+                return cells_.head(new[cell])
+            try:
+                return self.load.cell_head(cell, among=masters)
+            except KeyError:
+                if not esp.parse_exterior(cell):
+                    raise
+                return writer.exterior_head(esp.parse_exterior(cell))
+        return head_of
 
     # --- NPCs -------------------------------------------------------------------
 
@@ -231,10 +277,15 @@ class Project:
         masters = [self.game.master(m) for m in loadorder.masters_of(gen)]
         exteriors = self.load.cells()[1]
         key_of = lambda g: esp.exterior_key(g, exteriors.get(g, ""))     # noqa: E731
-        data, _, _ = writer.rewrite_plugin(gen, {}, {}, writer.RefNums(), masters, self._cell_key(key_of), key_of,
-                                           None, None, dict(npcs), topics)
+        new = self.new_cells()
+        cells = {c: refs for c, refs in self.gather_all()[0].items() if c in new} if new else {}
+        refnums = writer.RefNums(self.file("refnums") if new else None)
+        data, _, _ = writer.rewrite_plugin(gen, cells, {}, refnums, masters, self._cell_key(key_of), key_of,
+                                           self._head_of(None), None, dict(npcs), topics, always=tuple(new))
         writer.write_file(self.plugin, data)
-        return "wrote %s%s" % (os.path.basename(self.plugin), _npcs_text(npcs, topics)) if npcs or topics else ""
+        refnums.save()
+        said = _npcs_text(npcs, topics) + (", %d new cell%s" % (len(new), "" if len(new) == 1 else "s") if new else "")
+        return "wrote %s%s" % (os.path.basename(self.plugin), said) if said else ""
 
     # --- Editing a plugin in place ------------------------------------------------
 
@@ -270,7 +321,7 @@ class Project:
             json.dump(config, f, indent=1)
 
     def write_in_place(self):
-        cells, vanilla, _ = self.gather()
+        cells, vanilla, _ = self.gather_all()
         npcs, topics, extra_need = self.records_and_needs()
         exteriors = self.load.cells()[1]
         key_of = lambda g: esp.exterior_key(g, exteriors.get(g, ""))     # noqa: E731
@@ -282,19 +333,12 @@ class Project:
         index = {os.path.basename(m).lower(): i for i, m in enumerate(masters)}
         self._new_masters(masters, cells, vanilla, extra_need)
 
-        def head_of(cell):
-            try:
-                return self.load.cell_head(cell, among=[os.path.basename(m) for m in masters])
-            except KeyError:
-                if not esp.parse_exterior(cell):
-                    raise
-                return writer.exterior_head(esp.parse_exterior(cell))
-
         refnums = writer.RefNums(self.file("refnums"))
         data, written, count = writer.rewrite_plugin(
-            self.file("base"), cells, vanilla, refnums, masters, self._cell_key(key_of), key_of, head_of,
+            self.file("base"), cells, vanilla, refnums, masters, self._cell_key(key_of), key_of,
+            self._head_of([os.path.basename(m) for m in masters]),
             lambda r: index[r["origin"].lower()], dict(npcs), topics,
-            persistent=self.persistent())
+            persistent=self.persistent(), always=tuple(self.new_cells()))
         writer.write_file(self.plugin, data)
         refnums.save()
         self.config["written"] = hashlib.sha1(data).hexdigest()
@@ -463,7 +507,7 @@ class Project:
             return self.write_in_place()
         if self.builds_base:
             return self._write_generated()
-        cells, vanilla, _ = self.gather()
+        cells, vanilla, _ = self.gather_all()
         npcs, topics, extra_need = self.records_and_needs()
         exteriors = self.load.cells()[1]
         writer.rehome_exterior_refs(cells, vanilla, lambda g: esp.exterior_key(g, exteriors.get(g, "")))
@@ -472,16 +516,9 @@ class Project:
         names = [m.name for m in masters]
         index = {n.lower(): i for i, n in enumerate(names)}
         refnums = writer.RefNums(self.file("refnums"))
-        def head_of(cell):
-            try:
-                return self.load.cell_head(cell, among=names)
-            except KeyError:
-                if not esp.parse_exterior(cell):
-                    raise
-                return writer.exterior_head(esp.parse_exterior(cell))
-        records, count = writer.edited_cell_records(cells, vanilla, None, refnums, head_of=head_of,
+        records, count = writer.edited_cell_records(cells, vanilla, None, refnums, head_of=self._head_of(names),
                                                     master_index=lambda r: index[r["origin"].lower()],
-                                                    persistent=self.persistent())
+                                                    persistent=self.persistent(), always=tuple(self.new_cells()))
         writer.write_file(self.plugin, writer.plugin_bytes([rec for _, rec in npcs] + records + list(topics.values()),
                                                            [m.path for m in masters],
                                                            self.config["description"], self.config["author"],

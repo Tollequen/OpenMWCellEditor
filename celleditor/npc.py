@@ -1,7 +1,7 @@
 """NPC_ records as editable fields, and written back."""
 import struct
 
-from . import esp
+from . import esp, magic
 from .actor import ARMOR_SLOTS, CLOTHING_SLOTS
 from .esp import cstr, zstr
 
@@ -194,6 +194,12 @@ class Index:
         w = self.where(tag).get(oid.lower())
         return None if w is None else esp.record_subs(w[0].path, w[1])
 
+    def _gmst_text(self, name):
+        """A game setting's string, or None."""
+        g = self._subs("GMST", name)
+        v = dict(g[2]).get("STRV") if g else None
+        return cstr(v) if v else None
+
     def _ok(self, name):
         return self.usable is None or name.lower() in self.usable
 
@@ -296,9 +302,11 @@ class Index:
         scripts = sorted((cstr(d["SCHD"][:32]) for d, _ in each("SCPT") if "SCHD" in d), key=str.lower)
         globals_ = sorted((cstr(d["NAME"]) for d, _ in each("GLOB")), key=str.lower)
         enchants = []
-        for d, _ in each("ENCH"):                         # ENDT: type, cost, charge, flags
-            t = struct.unpack_from("<i", d.get("ENDT", b"").ljust(4, b"\0"))[0]
-            enchants.append({"id": cstr(d["NAME"]), "type": ENCHANT_TYPES[t] if 0 <= t < len(ENCHANT_TYPES) else "?"})
+        wording = magic.Wording(self._gmst_text, ATTRIBUTES, SKILLS)
+        for _, subs in each("ENCH"):
+            e = magic.enchantment(subs, wording)
+            t = e.pop("kind")
+            enchants.append(dict(e, type=ENCHANT_TYPES[t] if 0 <= t < len(ENCHANT_TYPES) else "?"))
         creatures = [{"id": cstr(d["NAME"]), "name": cstr(d.get("FNAM", b""))} for d, _ in each("CREA")]
         skills = [list(v) for v in SKILL_DATA]
         for d, _ in each("SKIL"):

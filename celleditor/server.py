@@ -10,7 +10,7 @@ import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import actor, desktop, esp, geometry, items, launcher, mcp, models, nif, npc, qr, writer
+from . import actor, cells as cells_, desktop, esp, geometry, items, launcher, mcp, models, nif, npc, qr, writer
 from .gamedata import openmw_cfg, read_cfg
 from .history import History, states
 from .live import LIVE
@@ -515,7 +515,7 @@ def _gather(extra=(), edits=None):
     with LOCK:
         project.edits_override = None if edits is None else dict(writer.empty_edits(), **edits)
         try:
-            cells, vanilla, keys = project.gather(extra)
+            cells, vanilla, keys = project.gather_all(extra)
         finally:
             project.edits_override = None
         return cells, vanilla, project.clones(), keys
@@ -580,12 +580,13 @@ def _light_point(mesh):
     return _light_points[mesh]
 
 
-def cell_mood(name):
-    """An interior's light: {ambient, sun, fog} colours (0-255) from its AMBI; None for an exterior."""
+def cell_mood(name, fresh=None):
+    """An interior's light: {ambient, sun, fog} colours (0-255) from its AMBI; None for an exterior (fresh: a new
+    cell's entry)."""
     if esp.parse_exterior(name):
         return None
     try:
-        head = dict(project.load.cell_head(name))
+        head = dict(cells_.head(fresh) if fresh else project.load.cell_head(name))
     except KeyError:
         try:                              # a cell of the project's own (a generator's): as last written
             head = dict(esp.cell_refs(project.plugin, name)[0])
@@ -649,6 +650,8 @@ def all_cells():
     known = {n.lower() for n in interiors}
     out = [{"name": n, "exterior": False} for n in project.own_cells
            if n.lower() not in known and not esp.parse_exterior(n)]
+    out += [{"name": n, "exterior": False, "new": True} for n in sorted(project.new_cells(), key=str.lower)
+            if n.lower() not in known]
     out += [{"name": n, "exterior": False} for n in interiors]
     out += [{"name": esp.exterior_key(g, exteriors[g]), "exterior": True, "grid": list(g)}
             for g in sorted(exteriors, key=lambda g: (exteriors[g].lower(), g))]
@@ -763,6 +766,23 @@ def item_info(oid, edits=None):
     return dict(it, own=own, canEdit=project.can_edit_npcs and it["editable"], canCopy=project.can_edit_npcs)
 
 
+def cell_settings(name, taken=()):
+    """For the New cell window: an interior's settings (to start from), and why the name can't be a new cell's."""
+    with LOCK:
+        interiors = list(project.load.cells()[0]) + [c for c in project.own_cells if not esp.parse_exterior(c)]
+        out = {"error": cells_.name_error(name.strip(), interiors + list(taken)), "settings": None}
+        try:
+            head = project.load.cell_head(name)
+        except KeyError:
+            try:
+                head = esp.cell_refs(project.plugin, name)[0]
+            except (KeyError, OSError):
+                head = None
+        if head and not esp.parse_exterior(name):
+            out["settings"] = cells_.settings(head)
+    return out
+
+
 def item_new_id(base, taken=()):
     with LOCK:
         return {"id": project.items().free_id(base, taken)}
@@ -848,12 +868,15 @@ def cell_data(name, edits=None):
         if v.get("model") is not None and (v.get("new") or k in index):
             index[k] = (v.get("kind") or index[k][0], v["model"])
     refs = [_entry(r, clones, index) for r in placed]
+    fresh = cells_.new_cells(edits or project.load_edits()).get(name)
     try:
+        if fresh:
+            raise KeyError(name)
         water = project.water(name)
     except KeyError:
         water = None
         try:
-            head = dict(project.load.cell_head(name))
+            head = dict(cells_.head(fresh) if fresh else project.load.cell_head(name))
             flags = struct.unpack_from("<I", head["DATA"])[0]
             if grid:
                 water = 0.0 if flags & 0x02 else None
@@ -875,9 +898,9 @@ def cell_data(name, edits=None):
         start = {"pos": [xs[mid], ys[mid], zs[mid] + 60], "yaw": 0.0}
     else:
         start = {"pos": [0, 0, 100], "yaw": 0.0}
-    can_add = project.can_add(name)
+    can_add = bool(fresh) or project.can_add(name)
     return {"name": name, "refs": refs, "start": start, "water": water, "grid": list(grid) if grid else None,
-            "canAdd": can_add, "mood": cell_mood(name)}
+            "canAdd": can_add, "mood": cell_mood(name, fresh), "new": bool(fresh)}
 
 
 def _moved_in_from(grid, edits=None):
@@ -1068,7 +1091,8 @@ def clean_edits(edits):
             "props": {k: {f: p[f] for f in sorted(p)} for k, p in sorted((edits.get("props") or {}).items())
                       if p and k not in gone},
             "containers": {k: v for k, v in sorted((edits.get("containers") or {}).items()) if v},
-            "items": {k: v for k, v in sorted((edits.get("items") or {}).items()) if v}}
+            "items": {k: v for k, v in sorted((edits.get("items") or {}).items()) if v},
+            "cells": {k: cells_.clean(v) for k, v in sorted((edits.get("cells") or {}).items()) if v}}
 
 
 def _base_ids(edits):
@@ -1091,6 +1115,12 @@ def save(edits, label=""):
             project.edits_override = clean
             try:
                 project.records_and_needs()
+            finally:
+                project.edits_override = None
+        if clean["cells"]:
+            project.edits_override = clean
+            try:
+                project.check_new_cells()
             finally:
                 project.edits_override = None
         if not history.versions() and os.path.exists(path):
@@ -1484,6 +1514,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.reply(json.dumps(item_info(body["id"], body.get("edits") or {})).encode())
                 except KeyError:
                     return self.reply(b"{}", code=404)
+            if u.path == "/api/cell/settings":
+                return self.reply(json.dumps(cell_settings(body.get("name") or "", body.get("taken") or [])).encode())
             if u.path == "/api/item/new-id":
                 return self.reply(json.dumps(item_new_id(body["base"], body.get("taken") or [])).encode())
             if u.path == "/api/files":

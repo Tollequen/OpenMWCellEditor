@@ -10,6 +10,7 @@ import { setupNpcEditor } from './npc.js';
 import { setSuggestions, suggest } from './suggest.js';
 import { setupContents } from './contents.js';
 import { setupItems } from './items.js';
+import { setupCells } from './cells.js';
 import { setupChoose, choose, withChooser } from './choose.js';
 import { setupGamepad } from './gamepad.js';
 
@@ -134,13 +135,132 @@ function setGizmoMode(mode) {
   updateSnap();
 }
 
+// Snapping: "Snap to grid" puts objects on the floor grid's squares (it takes over from the move step), "Snap to
+// steps" moves and turns by the steps in Settings. Both are switched in the floating bar of the selection.
 function updateSnap() {
   const on = $('snap').checked;
-  gizmo.setTranslationSnap(on ? state.moveStep : null);
-  gizmo.setRotationSnap(on ? state.rotStep * DEG : null);
+  const pieces = grid.snap && roots().length && roots().every((o) => isPiece(o.userData.ref.mesh));
+  gizmo.setTranslationSnap(on && !grid.snap ? state.moveStep : null);
+  gizmo.setRotationSnap(pieces ? Math.PI / 2 : on ? state.rotStep * DEG : null);
+  paintGrid();
 }
 
+// --- Floor grid ------------------------------------------------------------
+// A grid of squares to build rooms on. Snapped objects land with x and y on the squares. Room pieces (walls,
+// floors, doors: the models in Morrowind's i, x and d folders) also go up and down in steps of 64 and turn by
+// quarter turns, as the game's own are laid out; other objects keep their height on the surface.
+
+const GRID_STEPS = [64, 128, 256];
+const GRID_Z = 64;
+const grid = { on: stored('ce-grid') === '1', snap: stored('ce-grid-snap') === '1',
+               step: GRID_STEPS.includes(+stored('ce-grid-step')) ? +stored('ce-grid-step') : 128, lines: null, z: 0 };
+const isPiece = (mesh) => !!mesh && /(^|[\\/])[ixd][\\/]/i.test(mesh);
+const toStep = (v, s) => Math.round(v / s) * s;
+
+// a position on the grid; moved: only the axes that were moved
+function snapPiece(pos, mesh, moved = [true, true, true]) {
+  if (!grid.snap) return pos;
+  const piece = isPiece(mesh);
+  return pos.map((v, i) => (!moved[i] || (i === 2 && !piece) ? v : toStep(v, i === 2 ? GRID_Z : grid.step)));
+}
+
+// the grid's lines: always in a new cell (it's the floor there), while moving with snap to grid, else when on
+function showGrid() {
+  if (grid.lines) { grid.lines.parent?.remove(grid.lines); grid.lines.geometry.dispose(); grid.lines = null; }
+  const cell = state.cell;
+  if (!cell || !(grid.on || cell.new || grid.dragging)) { requestRender(); return; }
+  const size = 8192, squares = Math.max(grid.step, 128);
+  // light lines over a cell's floor, dimmer ones over a new cell's dark background
+  grid.lines = new THREE.GridHelper(size, size / squares, cell.new ? 0x8a8f9c : 0xffffff, cell.new ? 0x4a4e58 : 0xcfe0ff);
+  grid.lines.rotation.x = Math.PI / 2;
+  grid.lines.raycast = () => {};
+  grid.lines.material.transparent = true;
+  grid.lines.material.opacity = cell.new ? 0.7 : 0.85;
+  grid.lines.material.depthWrite = false;
+  world.add(grid.lines);
+  levelGrid(true);
+}
+
+// keep the grid where you work: on the floor you're looking at, else the one below the camera (a new cell's is
+// at 0), centred on a square near the camera
+function levelGrid(now = false) {
+  if (!grid.lines || state.loadingCell) return;
+  let z = 0;
+  if (grid.dragging && roots().length) {
+    // under what's being moved
+    const b = boxOf(roots());
+    z = b.min.z + 1;
+  } else if (!state.cell.new) {
+    // the floor seen in the lower half of the view: the height most of a few rays land on
+    const seen = [];
+    for (const [x, y] of [[0, -0.35], [-0.45, -0.55], [0.45, -0.55], [0, -0.75], [-0.3, -0.85], [0.3, -0.85]]) {
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+      const h = raycaster.intersectObjects(world.children, true)
+        .find((o) => visibleChain(o.object) && !o.object.userData.water);
+      if (h?.face && h.face.normal.clone().transformDirection(h.object.matrixWorld).z > 0.6) seen.push(Math.round(h.point.z / 4) * 4);
+    }
+    const count = (v) => seen.filter((s) => s === v).length;
+    const hit = seen.length ? seen.reduce((a, b) => (count(b) > count(a) ? b : a)) : null;
+    if (hit == null && !now) return;
+    z = hit != null ? hit + 1.5 : camera.position.z - 120;
+    if (!now && Math.abs(z - grid.z) < 6) z = grid.z;
+  }
+  const x = toStep(camera.position.x, 1024), y = toStep(camera.position.y, 1024);
+  if (grid.lines.position.x === x && grid.lines.position.y === y && grid.lines.position.z === z) return;
+  grid.z = z;
+  grid.lines.position.set(x, y, z);
+  requestRender();
+}
+setInterval(() => levelGrid(), 600);
+
+function paintGrid() {
+  const steps = $('snap').checked;
+  const gridOn = `On: objects land on the grid's squares of ${grid.step} (walls and floors also turn by quarter turns), `
+    + 'and the grid shows while you move them. Click to move freely.';
+  const gridOff = 'Off. Click to make objects land on the grid, so room pieces fit each other without adjusting.';
+  const stepsOn = `On: moves in steps of ${state.moveStep} and turns in steps of ${state.rotStep}° (Settings). Click to turn off.`;
+  const stepsOff = `Off. Click to move in steps of ${state.moveStep} and turn in steps of ${state.rotStep}°.`;
+  for (const [id, on, yes, no] of [
+    ['grid-btn', grid.on, 'On: a grid of squares on the floor under you. Click to hide it.',
+     'Off. Click for a grid of squares on the floor under you (a new cell always has one).'],
+    ['qa-grid', grid.snap, gridOn, gridOff], ['tb-snapgrid', grid.snap, gridOn, gridOff],
+    ['qa-steps', steps, stepsOn, stepsOff], ['tb-snapsteps', steps, stepsOn, stepsOff]]) {
+    $(id).classList.toggle('on', on);
+    $(id).setAttribute('aria-pressed', String(on));
+    $(id).title = on ? yes : no;
+  }
+}
+function storeGrid() {
+  try {
+    localStorage.setItem('ce-grid', grid.on ? '1' : '0');
+    localStorage.setItem('ce-grid-snap', grid.snap ? '1' : '0');
+    localStorage.setItem('ce-grid-step', grid.step);
+  } catch (err) { /* private mode */ }
+}
+for (const s of GRID_STEPS) $('grid-step').add(new Option(String(s), s));
+$('grid-step').value = grid.step;
+$('grid-btn').addEventListener('click', () => { grid.on = !grid.on; storeGrid(); paintGrid(); showGrid(); });
+function toggleGridSnap() {
+  grid.snap = !grid.snap;
+  storeGrid();
+  updateSnap();
+  status(grid.snap ? `Snap to grid: objects land on squares of ${grid.step}.` : 'Snap to grid off.');
+}
+function toggleStepSnap() {
+  $('snap').checked = !$('snap').checked;
+  updateSnap();
+  status($('snap').checked ? `Snap to steps: ${state.moveStep} units, ${state.rotStep}°.` : 'Snap to steps off.');
+}
+for (const id of ['qa-grid', 'tb-snapgrid']) $(id).addEventListener('click', toggleGridSnap);
+for (const id of ['qa-steps', 'tb-snapsteps']) $(id).addEventListener('click', toggleStepSnap);
+$('grid-step').addEventListener('change', (e) => { grid.step = +e.target.value; storeGrid(); showGrid(); paintGrid(); e.target.blur(); });
+paintGrid();
+
 gizmo.addEventListener('dragging-changed', (e) => {
+  if (grid.snap && gizmo.mode === 'translate' && grid.dragging !== e.value) {
+    grid.dragging = e.value;
+    showGrid();
+  }
   if (e.value) {
     gizmoStart = { q: proxy.quaternion.clone(), pivot: proxy.position.clone(),
                    items: new Map(roots().map((o) => {
@@ -172,7 +292,8 @@ gizmo.addEventListener('objectChange', () => {
       r.pos = p.toArray();
       r.rot = rotOf(turn.clone().multiply(rotMatrix(s.rot)));
     } else {
-      r.pos = [s.pos[0] + move.x, s.pos[1] + move.y, s.pos[2] + move.z];
+      r.pos = snapPiece([s.pos[0] + move.x, s.pos[1] + move.y, s.pos[2] + move.z], r.mesh,
+                        [move.x, move.y, move.z].map((v) => Math.abs(v) > 1e-4));
     }
   }, false);
 });
@@ -798,6 +919,24 @@ const contentsWin = setupContents({ state, status, icon: itemIcon, entriesOf, di
 const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, entriesOf, diffOf,
                               changed: () => { updatePanel(); updateDirty(); refreshCell(); },
                               place: (o) => startPlacing('object', { o, opts: {} }) });
+const cellsWin = setupCells({ state, status, entriesOf, diffOf, changed: (ids) => showChanges(ids, false),
+                              go: (name) => { cellCache.delete(name); return loadCell(name); } });
+$('cell-edit').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); cellsWin.edit(state.cell?.name); });
+
+// A new cell was made, changed or taken away: show the current one as it is now, or leave it
+function cellsChanged() {
+  const cur = state.cell;
+  if (!cur || state.loadingCell) return false;
+  const mine = cellsWin.entry(cur.name);
+  if (mine) { cellCache.delete(cur.name); loadCell(cur.name, true); return true; }
+  if (!cur.new) return false;
+  const next = [state.data.startCell, ...state.data.cells.map((c) => c.name)].find((n) => n && n !== cur.name);
+  cellCache.delete(cur.name);
+  status(`${cur.name} isn't there any more.`);
+  if (next) loadCell(next);
+  return true;
+}
+
 function editItem() {
   const r = state.selection.length === 1 && state.selected.userData.ref;
   if (!r || !r.item) return;
@@ -903,6 +1042,12 @@ async function loadCell(name, keepCamera = false) {
     water.userData.water = true;
     world.add(water);
   }
+  if (cell.new) {
+    // a new cell's floor at height 0, to place things on (showGrid draws its squares)
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(8192, 8192),
+      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+    world.add(floor);
+  }
   if (cell.grid) {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) jobs.push(loadTerrain(cell.grid[0] + dx, cell.grid[1] + dy, world));
@@ -920,6 +1065,7 @@ async function loadCell(name, keepCamera = false) {
   aimCamera();
   await Promise.all(jobs);
   state.loadingCell = false;
+  showGrid();
   refreshVisibility();
   updateMarkers();
   $('loading').style.display = 'none';
@@ -972,6 +1118,7 @@ async function loadTerrain(gx, gy, into) {
 function updateCellControls() {
   const cur = state.cell && state.cell.name;
   $('cell-name').textContent = cur || '…';
+  $('cell-edit').style.display = state.cell?.new ? '' : 'none';
 }
 
 async function toggleFavorite(name) {
@@ -987,9 +1134,9 @@ function browseCells() {
   openPicker({
     title: 'Cells', types: ['Favourites', 'Interior', 'Exterior'],
     placeholder: 'Search cells, e.g. balmora, guild, (-3, -2)…',
-    items: state.data.cells.map((c) => ({ id: c.name, name: '', type: c.exterior ? 'Exterior' : 'Interior' })),
+    items: cellsWin.list().map((c) => ({ id: c.name, name: '', type: c.exterior ? 'Exterior' : 'Interior' })),
     first: fav, star: { on: fav, toggle: (o) => toggleFavorite(o.id) },
-    onPick: (o) => loadCell(o.id),
+    onPick: (o) => loadCell(o.id), newCell: true,
   });
 }
 
@@ -1085,6 +1232,7 @@ function groupButton() {
 function setSelection(objs) {
   state.selection = objs.filter((o) => o && o.visible);
   state.selected = state.selection[state.selection.length - 1] || null;
+  updateSnap();
   updateSelBoxes();
   syncGizmo();
   updatePanel();
@@ -1117,6 +1265,7 @@ function updateTouchBar() {
   $('tb-name').textContent = state.multiTouch ? `Multi-select: ${n ? `${n} selected` : 'tap objects'}`
     : n > 1 ? `${n} objects` : r ? r.src : 'Tap an object';
   $('tb-nudge').style.display = roots().length && !state.multiTouch ? '' : 'none';
+  $('tb-snapgrid').style.display = $('tb-snapsteps').style.display = roots().length ? '' : 'none';
   $('tb-npc').style.display = n === 1 && r && r.kind === 'npc' ? '' : 'none';
   $('tb-cont').style.display = n === 1 && r && r.container ? '' : 'none';
   $('tb-own').style.display = n === 1 && r && r.ownable && r.editable && (r.container || r.isDoor) ? '' : 'none';
@@ -1220,8 +1369,11 @@ function updateQuickActs() {
   $('qa-contents').style.display = cont ? '' : 'none';
   $('qa-own').style.display = own ? '' : 'none';
   $('qa-item').style.display = r && r.item ? '' : 'none';
-  $('qa-name').textContent = npc || cont || !r?.isDoor ? r?.src || '' : door ? `Door to ${door.cell || 'the outside'}` : 'A door that leads nowhere';
-  $('quick-acts').classList.toggle('open', npc || go || set || cont || own || !!(r && r.item));
+  const n = state.selection.length, movable = roots().length > 0;
+  $('qa-snaps').style.display = movable ? '' : 'none';
+  $('qa-name').textContent = n > 1 ? `${n} objects` : npc || cont || !r?.isDoor ? r?.src || ''
+    : door ? `Door to ${door.cell || 'the outside'}` : 'A door that leads nowhere';
+  $('quick-acts').classList.toggle('open', movable || npc || go || set || cont || own || !!(r && r.item));
 }
 $('qa-npc').addEventListener('click', () => $('edit-npc').click());
 $('qa-go').addEventListener('click', () => $('door-go').click());
@@ -1253,7 +1405,7 @@ function setDoorDest(r) {
   openPicker({
     title: `Where does ${r.src} lead?`, types: ['Favourites', 'Interior', 'Exterior'],
     placeholder: 'Search cells, e.g. balmora, guild, (-3, -2)…',
-    items: state.data.cells.map((c) => ({ id: c.name, name: '', type: c.exterior ? 'Exterior' : 'Interior' })),
+    items: cellsWin.list().map((c) => ({ id: c.name, name: '', type: c.exterior ? 'Exterior' : 'Interior' })),
     first: fav, star: { on: fav, toggle: (o) => toggleFavorite(o.id) },
     onPick: (o) => startDestPick(r, o.id),
   });
@@ -1360,6 +1512,7 @@ function canonical(e) {
     props: entries(e.props, (v) => JSON.stringify(sortedKeys(v))),
     containers: entries(e.containers, (v) => JSON.stringify(sortedKeys(v))),
     items: entries(e.items, (v) => JSON.stringify(sortedKeys(v))),
+    cells: entries(e.cells, (v) => JSON.stringify(sortedKeys(v))),
   });
 }
 
@@ -1393,7 +1546,7 @@ function updateDirty() {
 
 function withSections(e) {
   return Object.assign({ moved: {}, deleted: [], replaced: {}, added: [], attached: {}, doors: {}, groups: {}, npcs: {}, dialogue: {},
-                         props: {}, containers: {}, items: {} }, e);
+                         props: {}, containers: {}, items: {}, cells: {} }, e);
 }
 
 function offerDraft() {
@@ -1858,7 +2011,7 @@ const picker = { onPick: null, items: [], source: [], sel: 0 };
 const canTag = (o) => o.userData.ref.origin === 'added' && o.userData.ref.editable && !isNewNpc(o.userData.ref.src);
 
 async function openPicker({ title, items, types, placeholder, onPick, first = null, star = null,
-                            attach = null, action = null, groups = [], remember = null }) {
+                            attach = null, action = null, groups = [], remember = null, newItem = false, newCell = false }) {
   if (document.pointerLockElement) document.exitPointerLock();
   closeMenu();
   $('pk-title').textContent = title;
@@ -1891,6 +2044,8 @@ async function openPicker({ title, items, types, placeholder, onPick, first = nu
   $('pk-type-label').textContent = action ? 'Category' : 'Type';
   if (action) $('pk-pv-use').textContent = action;
   $('pk-views').style.display = action ? '' : 'none';
+  $('pk-new-item').style.display = newItem ? '' : 'none';
+  $('pk-new-cell').style.display = newCell ? '' : 'none';
   picker.grid = stored('ce-pk-view') === 'grid';
   preview.shown = null;
   $('picker').classList.add('open');
@@ -1919,7 +2074,8 @@ async function pickObject(title, onPick, attach = null, action = 'Add', group = 
   const mods = files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]);
   openPicker({ title, items, types: ['Favourites', 'Recent', ...OBJECT_CATEGORIES], onPick: withRecent(onPick),
                attach, action, first: fav, star: { on: fav, toggle: (o) => toggleObjectFavorite(o.id) },
-               groups: mods.length ? [{ label: 'Mods', options: mods }] : [], remember: 'objects' });
+               groups: mods.length ? [{ label: 'Mods', options: mods }] : [], remember: 'objects',
+               newItem: action === 'Add' });
   $('pk-group-row').style.display = group ? '' : 'none';
   $('pk-group').checked = true;
   $('pk-group-label').textContent = `Add to the group (${group} objects)`;
@@ -2087,6 +2243,13 @@ function pick(o) {
   if (fn) fn(o);
 }
 
+// New item… in the catalogue: the item made is added as one picked from the list would be
+$('pk-new-item').addEventListener('click', () => {
+  const fn = picker.onPick;
+  closePicker();
+  opening(itemsWin.create(fn));
+});
+$('pk-new-cell').addEventListener('click', () => { closePicker(); cellsWin.create(); });
 $('pk-search').addEventListener('input', () => filterPicker());
 $('pk-type').addEventListener('change', () => {
   if (picker.remember) storeNow(picker.remember, $('pk-type').value);
@@ -2529,6 +2692,7 @@ function addAt(hit, kind = 'object', preset = null) {
     const pos = point.clone();
     if (normal.z > 0.6 && Number.isFinite(box.min.z)) pos.z -= box.min.z;
     else pos.addScaledVector(normal, 2);
+    pos.fromArray(snapPiece(pos.toArray(), o.mesh));
     const quarter = Math.PI / 2;
     const yaw = ((Math.round((state.yaw + Math.PI) / quarter) * quarter) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -4134,7 +4298,7 @@ const listText = (xs) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).
 function changesText(before, after) {
   const sets = { moved: new Set(), added: new Set(), deleted: new Set(), swapped: new Set(), restored: new Set(),
                  doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), containers: new Set(), items: new Set(),
-                 other: new Set() };
+                 cells: new Set(), other: new Set() };
   for (const { id } of diffOf(before, after)) {
     const [sec, k] = splitId(id);
     if (sec === 'added') sets[!before.has(id) ? 'added' : !after.has(id) ? 'deleted' : 'moved'].add(id);
@@ -4147,6 +4311,7 @@ function changesText(before, after) {
     else if (sec === 'props') sets.props.add(k);
     else if (sec === 'containers') sets.containers.add(k);
     else if (sec === 'items') sets.items.add(k);
+    else if (sec === 'cells') sets.cells.add(k);
     else sets.other.add(k);
   }
   for (const k of sets.deleted) sets.moved.delete(k);
@@ -4158,6 +4323,7 @@ function changesText(before, after) {
   if (sets.props.size) parts.push(`owner or lock of ${n(sets.props, 'object', 'objects')} changed`);
   if (sets.containers.size) parts.push(`contents of ${n(sets.containers, 'container', 'containers')} changed`);
   if (sets.items.size) parts.push(`${n(sets.items, 'item', 'items')} made or changed`);
+  if (sets.cells.size) parts.push(`${n(sets.cells, 'cell', 'cells')} made or changed`);
   if (sets.npcs.size) parts.push(`${n(sets.npcs, 'NPC', 'NPCs')} changed`);
   if (sets.responses.size) parts.push(`${n(sets.responses, 'response', 'responses')} changed`);
   if (!parts.length && sets.other.size) parts.push('attached or grouped objects changed');
@@ -4204,11 +4370,11 @@ async function save() {
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
   ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
-  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
 const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
-                       'lock-btn': 'lock', 'light-btn': 'bulb' };
+                       'lock-btn': 'lock', 'light-btn': 'bulb', 'grid-btn': 'grid' };
 const layoutHome = new Map();
 const newLayout = () => document.body.classList.contains('layout-new');
 
@@ -4456,7 +4622,7 @@ function sendPicture(saved) {
 const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 const live = { shared: new Map(), sent: new Map(), timer: null, sending: null, again: false, ready: false,
                others: new Map(), lastWhere: '', whereAt: 0, refreshing: false, refreshAgain: false };
-const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers', 'items'];
+const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers', 'items', 'cells'];
 const UA = navigator.userAgent;
 const DEVICE = /iPhone/.test(UA) ? 'iPhone' : /iPad/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1) ? 'iPad'
   : /Android/.test(UA) ? (/Mobile/.test(UA) ? 'Android phone' : 'Android tablet') : 'Computer';
@@ -4632,6 +4798,7 @@ function showChanges(ids, remote = true) {
     }
   }
   if (ids.some((id) => id.startsWith('npcs|') || id.startsWith('dialogue|'))) { npcEditor.refresh(ids); refreshNpcBodies(); }
+  if (ids.some((id) => id.startsWith('cells|'))) { if (cellsChanged()) refresh = false; }
   refreshVisibility();
   updateSelBoxes();
   updatePanel();
