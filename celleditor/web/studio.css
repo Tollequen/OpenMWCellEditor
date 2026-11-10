@@ -15,8 +15,7 @@ body.studio.hints #toast { bottom: 40px; }
 body.studio #loading { left: calc(var(--vl) + 12px); bottom: calc(var(--vb) + 12px); }
 body.studio #quick-acts, body.studio label.opt:has(#dock) { display: none !important; }
 body.studio #show-panel { top: calc(var(--vt) + 10px); background: var(--float); }
-body.studio.mouse-look #show-panel, body.studio.pad #inspector { display: none; }
-body.studio.mouse-look #topbar, body.studio.mouse-look #inspector { display: none; }
+body.studio.mouse-look #show-panel, body.studio.mouse-look #topbar { display: none; }
 
 /* Toolbar */
 #topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--sb-top); box-sizing: border-box; z-index: 4; display: flex;
@@ -79,7 +78,11 @@ body.studio details.fold summary { text-transform: uppercase; letter-spacing: .0
 #inspector { position: fixed; right: 10px; top: calc(var(--vt) + 10px); width: 292px; max-height: calc(100% - var(--vt) - var(--vb) - 20px);
              overflow-y: auto; box-sizing: border-box; z-index: 3; display: none; background: var(--float); border: 1px solid var(--line);
              border-radius: 6px; box-shadow: var(--shadow); }
-body.studio.has-sel:not(.building) #inspector { display: block; }
+body.studio.has-sel:not(.building):not(.pad) #inspector { display: block; }
+/* Fly mode: the mouse is captured, so only what the selection is and where */
+body.studio.mouse-look #inspector { pointer-events: none; width: 250px; top: 10px; }
+body.studio.mouse-look #inspector :is(h3, #n-modes, #qa-snaps, #npc-row, #door-row, #own-row .row, #sel-edit button) { display: none !important; }
+body.studio.mouse-look #inspector .psec { padding-bottom: 6px; }
 #inspector .psec { border: none; }
 #inspector #npc-row, #inspector #own-row, #inspector #door-row { margin: 0 0 8px; }
 #inspector #own-row .row, #inspector #door-row .row { margin-top: 4px; }
@@ -100,5 +103,7 @@ body.studio.hints #rb-float, body.studio.hints #look-keys { display: none !impor
 #hintbar .h b, #hintbar .what { font-weight: 600; color: #fff; flex: none; }
 #hintbar kbd { font-size: 10.5px; padding: 1px 4px; text-shadow: none; }
 #hintbar .rest { display: flex; gap: 16px; flex: 1; min-width: 0; overflow: hidden; }
-#hintbar button { pointer-events: auto; flex: none; height: 22px; width: 22px; padding: 2px; color: #d6d6da; }
+body.studio.hints #hintbar { padding-right: 46px; }
+#tb-keys { position: fixed; right: 8px; bottom: 4px; z-index: 4; width: 30px; height: 24px; padding: 2px; background: var(--float); }
+body.studio.mouse-look #tb-keys, body.studio.pad #tb-keys { display: none; }
 body.touch #paint-rooms { display: none; }

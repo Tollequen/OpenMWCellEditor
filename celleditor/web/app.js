@@ -5153,12 +5153,12 @@ function setupStudio() {
   body.classList.add('studio');
 
   const settings = tool('tb-settings', 'gear', 'Settings: steps, speeds, grid, layout');
-  const keys = tool('tb-keys', 'keyboard', 'Controls: every key, and the key hints along the bottom');
+  const keys = tool('tb-keys', 'keyboard', 'Controls: every key, and the key hints');
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
   top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'), sep(), group($('undo'), $('redo')),
              make('span', '', 'spacer'), $('mouselook'), sep(),
-             group(settings, keys, $('fullscreen'), $('hide-panel')), $('save'));
+             group(settings, $('fullscreen'), $('hide-panel')), $('save'));
   body.append(top);
 
   const pops = [];
@@ -5175,7 +5175,9 @@ function setupStudio() {
       for (const [, q] of pops) q.classList.remove('open');
       p.classList.toggle('open', open);
       const r = btn.getBoundingClientRect();
-      p.style.top = (r.bottom + 8) + 'px';
+      const up = r.top > window.innerHeight / 2;
+      p.style.top = up ? '' : (r.bottom + 8) + 'px';
+      p.style.bottom = up ? (window.innerHeight - r.top + 8) + 'px' : '';
       p.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
     });
   };
@@ -5198,9 +5200,8 @@ function setupStudio() {
   $('obj-history').after(close);
 
   const bar = make('div', 'hintbar');
-  const hide = tool('', 'x', 'Hide the key hints (the keyboard button at the top right brings them back)');
-  hide.classList.add('ghost');
-  bar.append(make('span', '', 'rest'), hide);
+  bar.append(make('span', '', 'rest'));
+  body.append(keys);
   body.append(bar);
   const setHints = (on) => {
     body.classList.toggle('hints', on);
@@ -5208,7 +5209,6 @@ function setupStudio() {
     try { localStorage.setItem('ce-hints', on ? '1' : '0'); } catch (err) { /* private mode */ }
   };
   setHints(stored('ce-hints') !== '0');
-  hide.addEventListener('click', () => { setHints(false); status('Key hints hidden. The keyboard button at the top right brings them back.'); });
   $('controls-help').querySelector('.body').prepend($('hints-row'));
   $('hints').addEventListener('change', () => setHints($('hints').checked));
   new MutationObserver(updateHints).observe(body, { attributes: true, attributeFilter: ['class'] });
@@ -5230,7 +5230,7 @@ function updateHints() {
     : $('dest-banner').classList.contains('open') ? ['Door destination', [['W A S D', 'fly to where the player arrives'], ['Right-drag', 'face the way they should']]]
     : document.body.classList.contains('mouse-look') ? ['Fly mode', [['W A S D', 'fly'], ['Q E', 'down, up'], ['Shift', 'faster'],
       ['Click', 'select at the crosshair'], ['Right-click', 'menu'], ['Arrows', 'move the object'], ['Z X', 'rotate'], ['G', 'drop'],
-      ['Del', 'delete'], [mod + ' Z', 'undo'], ['Tab', 'leave fly mode']]]
+      ['B', 'attach'], ['Del', 'delete'], [mod + ' Z', 'undo'], ['Tab', 'leave fly mode']]]
     : document.body.classList.contains('building') ? ['Room builder', [['Click, drag', 'place'], [alt + ' click', 'take away'],
       ['Z X', 'turn'], ['PgUp PgDn', 'raise, lower'], ['Wheel', 'next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
       [mod + ' Z', 'undo'], ['Esc', 'done']]]
@@ -5283,7 +5283,7 @@ function showGuide() {
     d.querySelector('ul').appendChild(li);
   }
   d.querySelector('.foot').textContent = TOUCH ? 'All controls: Controls, in the panel.'
-    : STUDIO ? 'This guide: press ?. Every control: the keyboard button at the top right.'
+    : STUDIO ? 'This guide: press ?. Every control: the keyboard button at the bottom right.'
     : 'All controls: Controls, at the bottom of the panel (or press ?).';
   bg.appendChild(d);
   document.body.appendChild(bg);
