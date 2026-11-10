@@ -4894,11 +4894,11 @@ async function save() {
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
   ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['paint-rooms', 'n-add'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
-  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
 const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
-                       'lock-btn': 'lock', 'light-btn': 'bulb', 'grid-btn': 'grid' };
+                       'lock-btn': 'lock', 'light-btn': 'bulb', 'grid-btn': 'grid', 'owned-btn': 'person' };
 const layoutHome = new Map();
 const newLayout = () => document.body.classList.contains('layout-new');
 
