@@ -8,7 +8,8 @@ from .esp import _split_refs, cell_refs, cstr, parse_exterior, record, sub, zstr
 
 CELL_SIZE = 8192
 
-EDIT_KINDS = ("moved", "deleted", "replaced", "added", "attached", "doors", "groups", "npcs", "dialogue", "props", "containers", "items")
+EDIT_KINDS = ("moved", "deleted", "replaced", "added", "attached", "doors", "groups", "npcs", "dialogue", "props", "containers", "items",
+              "cells", "magic")
 
 
 def ref(obj_id, x, y, z, rot=0.0, dest=None, scale=None, lock=None, rot_x=0.0, owner=None, rot_y=0.0,

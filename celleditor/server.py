@@ -1216,9 +1216,13 @@ def revert(name, key=None):
         if oid in target.get("npcs", {}):
             cur["npcs"][oid] = target["npcs"][oid]
         return save(cur, label="reverted")
-    for sec in ("containers", "items"):
+    for sec in ("containers", "items", "cells", "magic"):
         if key.startswith(sec + "|"):
             k = key[len(sec) + 1:]
+            name = (cur.get(sec, {}).get(k) or {}).get("name") or k
+            if sec == "cells" and k not in target.get(sec, {}) and any(a["cell"].lower() == k for a in cur["added"]):
+                raise ValueError("%s has objects in it: delete the cell in the editor, which takes them along."
+                                 % name)
             cur.setdefault(sec, {}).pop(k, None)
             if k in target.get(sec, {}):
                 cur[sec][k] = target[sec][k]
