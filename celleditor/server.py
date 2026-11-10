@@ -10,7 +10,7 @@ import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import actor, cells as cells_, desktop, esp, geometry, items, launcher, mcp, models, nif, npc, qr, writer
+from . import actor, cells as cells_, desktop, esp, pieces, geometry, items, launcher, mcp, models, nif, npc, qr, writer
 from .gamedata import openmw_cfg, read_cfg
 from .history import History, states
 from .live import LIVE
@@ -1423,6 +1423,8 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/catalog":
                 model_index()
                 return self.reply(_catalog)
+            if u.path == "/api/room-pieces":
+                return self.reply(json.dumps(pieces.cached(project.load.paths, model_index())).encode())
             if u.path == "/api/npcs":
                 return self.reply(json.dumps(npc_list()).encode())
             if u.path == "/api/npc":

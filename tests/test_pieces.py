@@ -1,0 +1,34 @@
+import os
+import struct
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from celleditor import esp, pieces  # noqa: E402
+
+
+def ref(num, oid, pos, turn=0.0):
+    return (esp.sub("FRMR", struct.pack("<I", num)) + esp.sub("NAME", esp.zstr(oid))
+            + esp.sub("DATA", struct.pack("<6f", *pos, 0, 0, turn)))
+
+
+class Find(unittest.TestCase):
+    def test_laid_out_on_a_grid(self):
+        refs = [ref(1, "in_x_room_corner", (0, 0, 0)), ref(2, "in_x_room_side", (256, 0, 0), 1.5707964),
+                ref(3, "in_x_shack", (37.5, 911.2, 4)), ref(4, "in_x_rock", (512, 0, 0), 0.3),
+                ref(5, "in_x_djamb", (100, 3, 0)), ref(6, "furn_chair", (0, 128, 0))]
+        cell = esp.record("CELL", [esp.sub("NAME", esp.zstr("Room")), esp.sub("DATA", struct.pack("<Iii", 1, 0, 0))] + refs)
+        path = os.path.join(tempfile.mkdtemp(), "X.esp")
+        with open(path, "wb") as f:
+            f.write(esp.record("TES3", [esp.sub("HEDR", b"\0" * 300)]) + cell)
+        stat = lambda m: ("STAT", m)   # noqa: E731
+        objects = {"in_x_room_corner": stat("i\\a.nif"), "in_x_room_side": stat("i\\b.nif"), "in_x_shack": stat("i\\c.nif"),
+                   "in_x_rock": stat("i\\d.nif"), "in_x_djamb": stat("i\\e.nif"), "furn_chair": stat("f\\f.nif"),
+                   "in_x_door": ("DOOR", "d\\g.nif")}
+        self.assertEqual(pieces.find([path], objects), ["in_x_djamb", "in_x_door", "in_x_room_corner", "in_x_room_side"])
+
+
+if __name__ == "__main__":
+    unittest.main()

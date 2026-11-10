@@ -2790,7 +2790,7 @@ $('place-cancel').addEventListener('click', () => stopPlacing());
 
 // --- Room painter -----------------------------------------------------------
 // A mode for building rooms from room pieces: choose a palette (one style of the load order's room pieces, or
-// all of them), then each click puts the chosen piece on the grid square under the pointer, at the painter's
+// all of them; the server finds them by how the game places them, pieces.py), then each click puts the chosen piece on the grid square under the pointer, at the painter's
 // height. The bar at the bottom picks the piece (or the wheel does), Z and X turn it by quarter turns, Page Up
 // and Page Down change the height by 64, a short right-click takes away a piece added in this cell.
 
@@ -2827,7 +2827,13 @@ async function openPainter(at = null) {
   if (document.pointerLockElement) pauseFly();
   closeMenu();
   stopPlacing();
-  painter.all = [...itemsWin.newItems(), ...await opening(getCatalog())].filter((o) => isPiece(o.mesh))
+  if (!painter.known) {
+    status('Finding the room pieces…');
+    painter.known = opening(fetch('/api/room-pieces').then((r) => r.json()).then((ids) => new Set(ids)));
+  }
+  let known;
+  try { known = await painter.known; } catch (err) { painter.known = null; status('The room pieces didn\'t load.', true); return; }
+  painter.all = (await opening(getCatalog())).filter((o) => known.has(o.id.toLowerCase()))
     .sort((a, b) => a.id.localeCompare(b.id));
   const counts = new Map();
   for (const o of painter.all) { const s = styleOf(o); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
