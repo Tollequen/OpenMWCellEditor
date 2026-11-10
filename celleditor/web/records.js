@@ -15,7 +15,8 @@ const el = (tag, cls, text) => {
 };
 const low = (s) => String(s || '').toLowerCase();
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-const KINDS = { WEAP: 'Weapon', ARMO: 'Armour', CLOT: 'Clothing', MISC: 'Misc item', BOOK: 'Book' };
+const KINDS = { WEAP: 'Weapon', ARMO: 'Armour', CLOT: 'Clothing', MISC: 'Misc item', BOOK: 'Book', ALCH: 'Potion', INGR: 'Ingredient',
+                LIGH: 'Light', STAT: 'Static', ACTI: 'Activator', DOOR: 'Door' };
 const ENCHANT_TYPES = ['Cast once', 'Cast when strikes', 'Cast when used', 'Constant effect'];
 const SPELL_TYPES = ['Spell', 'Ability', 'Blight', 'Disease', 'Curse', 'Power'];
 const NO_USE = 'Unused';
@@ -89,7 +90,7 @@ function tabs() {
              note: (api.magicLines(v.id) || []).join(', ') };
   });
   return [
-    { id: 'items', title: 'Items', empty: 'No items yet.', add: ['New item…', api.newItem],
+    { id: 'items', title: 'Items and objects', empty: 'No items or objects yet.', add: ['New item or object…', api.newItem],
       rows: rows('items', (k, v) => Object.assign(objectRow(k, v, 'item', KINDS[v.kind] || 'Item', 'items'),
                                                   v.new ? { edit: () => api.editItem(v.id) } : {})) },
     { id: 'npcs', title: 'NPCs', empty: 'No NPCs yet.', add: ['New NPC…', api.newNpc, true],

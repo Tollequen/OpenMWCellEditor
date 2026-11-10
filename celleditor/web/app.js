@@ -726,7 +726,7 @@ const isOwned = (p) => !!(p && (p.owner || p.faction));
 
 // what a newly placed object of a catalog type can have (the server says it for loaded ones)
 function typeFlags(type) {
-  return { props: {}, item: ['Weapon', 'Armor', 'Clothing', 'Misc', 'Book'].includes(type), container: type === 'Container',
+  return { props: {}, item: ['Weapon', 'Armor', 'Clothing', 'Misc', 'Book', 'Potion', 'Ingredient', 'Light'].includes(type), container: type === 'Container',
            lockable: type === 'Container' || type === 'Door', ownable: !['Static', 'NPC', 'Creature', 'Leveled creature'].includes(type) };
 }
 
@@ -2090,7 +2090,7 @@ const withRecent = (onPick) => (o) => { noteRecent(o.id); return onPick(o); };
 async function pickObject(title, onPick, attach = null, action = 'Add', group = 0) {
   const fav = (o) => state.objectFavorites.includes(o.id);
   const fresh = [...npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 })),
-                 ...itemsWin.newItems().map((o) => Object.assign(o, { rank: -1,
+                 ...itemsWin.newObjects().map((o) => Object.assign(o, { rank: -1,
                    cat: TYPE_CATEGORY[o.type] || (o.type === 'Misc' ? (o.key ? 'Keys' : 'Clutter') : 'Other') }))];
   const items = [...fresh, ...await opening(getCatalog())];
   const files = [...new Set(items.map((o) => o.file).filter((f) => f && !OFFICIAL_FILES.includes(f.toLowerCase())))];
@@ -5134,7 +5134,7 @@ if (!STUDIO) $('hints-row').style.display = 'none';
 function richPanel() {
   if (!STUDIO && !TOUCH) return;
   for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
-    ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item…', 'Your own weapon, armour, book…'],
+    ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item or object…', 'Your own weapon, potion, light, static…'],
     ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid'],
     ['records', 'Records…', 'Items, NPCs, magic and cells in this project']]) {
     const b = $(id);

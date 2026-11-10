@@ -546,7 +546,7 @@ def _entry(r, clones, index):
             "tag": project.tag(r["id"]) or r.get("tag"), "orig": orig,
             "light": light_info(src, index) if m and m[0] == "LIGH" else None,
             "props": writer.props_of(r), "lockable": bool(m and m[0] in ("DOOR", "CONT")),
-            "container": bool(m and m[0] == "CONT"), "item": bool(m and m[0] in items.KINDS),
+            "container": bool(m and m[0] == "CONT"), "item": bool(m and m[0] in items.CARRIED),
             "ownable": not (m and m[0] in ("NPC_", "CREA", "LEVC", "STAT")),
             "leveled": bool(m and m[0] == "LEVC")}
 
@@ -750,7 +750,7 @@ def container_info(oid, edits=None):
     if c.get("file") and c["file"].lower() in own_files:
         cells = _gather()[0]
         placed = sum(1 for refs in cells.values() for r in refs if r["id"].lower() == oid.lower())
-    own = bool(c.get("copy_of")) or placed == 1
+    own = bool(c.get("copy_of")) or c.get("file") is None or placed == 1
     return dict(c, own=own, canEdit=project.can_edit_npcs and c["editable"], canCopy=project.can_edit_npcs)
 
 
@@ -922,8 +922,10 @@ def cell_data(name, edits=None):
         if v.get("new"):
             index[k] = ("NPC_", v.get("model") or "")
     for k, v in ((edits or project.load_edits()).get("containers") or {}).items():
-        if v.get("new") and v.get("copy_of", "").lower() in index:
+        if v.get("new") and (v.get("copy_of") or "").lower() in index:
             index[k] = index[v["copy_of"].lower()]
+        elif v.get("new") and v.get("model"):
+            index[k] = ("CONT", v["model"])
     for k, v in ((edits or project.load_edits()).get("items") or {}).items():
         if v.get("model") is not None and (v.get("new") or k in index):
             index[k] = (v.get("kind") or index[k][0], v["model"])

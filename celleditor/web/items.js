@@ -1,4 +1,4 @@
-// Item editor: a new item from scratch, or a placed item's record (or a copy of it for that one)
+// Item and object editor: a new record from scratch, or a placed item's record (or a copy of it for that one)
 import * as THREE from 'three';
 import { icon } from './icons.js';
 import { setSuggestions, suggest } from './suggest.js';
@@ -8,7 +8,13 @@ import { choose, withChooser } from './choose.js';
 let api = null;
 let lists = null, listData = null;
 
-export const KINDS = { WEAP: 'Weapon', ARMO: 'Armor', CLOT: 'Clothing', MISC: 'Misc', BOOK: 'Book' };
+export const KINDS = { WEAP: 'Weapon', ARMO: 'Armor', CLOT: 'Clothing', MISC: 'Misc', BOOK: 'Book', ALCH: 'Potion',
+                       INGR: 'Ingredient', LIGH: 'Light', CONT: 'Container', STAT: 'Static', ACTI: 'Activator', DOOR: 'Door' };
+// what the kinds have: an icon, value and weight (things that can be carried), a name, a script, an enchantment
+const CARRIED = ['WEAP', 'ARMO', 'CLOT', 'MISC', 'BOOK', 'ALCH', 'INGR', 'LIGH'];
+const ENCHANTED = ['WEAP', 'ARMO', 'CLOT', 'BOOK'];
+const LIGHT_FLAGS = [[2, 'Can be carried (a torch or lantern)'], [16, 'Fire'], [8, 'Flickers'], [64, 'Flickers slowly'],
+  [128, 'Pulses'], [256, 'Pulses slowly'], [4, 'Darkens instead of lighting'], [32, 'Off until carried']];
 const WEAPON_TYPES = ['Short blade, one hand', 'Long blade, one hand', 'Long blade, two hands', 'Blunt, one hand',
   'Blunt, two hands (close)', 'Blunt, two hands (wide)', 'Spear, two hands', 'Axe, one hand', 'Axe, two hands',
   'Bow', 'Crossbow', 'Thrown', 'Arrow', 'Bolt'];
@@ -32,7 +38,7 @@ const SLOT_BODY = [0, 1, 2, 3, 4, 4, 5, 5, 6, 6, -1, 7, 7, 8, 8, 9, 9, 10, 10, 1
 
 export function setupItems(a) {
   api = a;
-  return { create, edit, newItems };
+  return { create, edit, newItems, newObjects };
 }
 
 const el = (tag, cls, text) => {
@@ -54,12 +60,27 @@ function itemLists() {
 
 // the new items of the edits, as the item lists have them (for the wardrobe, contents and the catalog)
 function newItems() {
-  return Object.values(api.state.edits.items || {}).filter((v) => v.new && v.kind in KINDS).map((v) => ({
+  return newObjects().filter((o) => o.carried);
+}
+
+// every new record that can be placed: the items, and statics, activators, doors and containers made from scratch
+function newObjects() {
+  const made = Object.values(api.state.edits.containers || {}).filter((c) => c.new && !c.copy_of).map((c) => ({
+    id: c.id, name: c.name, type: 'Container', mesh: c.model, file: api.state.data.project.plugin }));
+  return [...made, ...Object.values(api.state.edits.items || {}).filter((v) => v.new && v.kind in KINDS).map((v) => ({
+    carried: CARRIED.includes(v.kind),
     id: v.id, name: v.name, type: KINDS[v.kind], icon: v.icon, mesh: v.model, file: api.state.data.project.plugin,
     ...(v.kind === 'ARMO' ? { slots: [ARMOR_SLOTS[v.atype]].filter(Boolean), rating: v.rating } : {}),
     ...(v.kind === 'CLOT' ? { slots: CLOTHING_SLOTS[v.ctype] || [], value: v.value } : {}),
     ...(v.kind === 'MISC' && v.mflags & 1 ? { key: true } : {}),
-  }));
+  }))];
+}
+
+let magicInfo = null;
+function effectsInfo() {
+  magicInfo = magicInfo || fetch('/api/magic/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then((r) => r.json()).catch((err) => { magicInfo = null; throw err; });
+  return magicInfo;
 }
 
 const idFrom = (name) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 28) || 'new_item';
@@ -190,15 +211,15 @@ async function itemInfo(id) {
 }
 
 // place: what Create does with the new item (default: the click that puts it in the cell)
-async function create(place = null) {
-  try { await itemLists(); } catch (err) { api.status('The lists didn\'t load.', true); return; }
-  open({ new: true, kind: 'MISC', id: '', name: '', model: '', icon: '', script: '', enchant: '', weight: 1, value: 1,
-         enchant_pts: 0, mflags: 0, own: true, canEdit: true }, null, place);
+async function create(place = null, kind = 'MISC') {
+  try { await Promise.all([itemLists(), effectsInfo()]); } catch (err) { api.status('The lists didn\'t load.', true); return; }
+  open({ new: true, kind, id: '', name: '', model: '', icon: '', script: '', enchant: '', weight: 1, value: 1,
+         enchant_pts: 0, ...JSON.parse(JSON.stringify(DEFAULTS[kind])), own: true, canEdit: true }, null, place);
 }
 
 async function edit(r) {
   let info;
-  try { [info] = await Promise.all([itemInfo(r.src), itemLists()]); } catch (err) { api.status(err.message, true); return; }
+  try { [info] = await Promise.all([itemInfo(r.src), itemLists(), effectsInfo()]); } catch (err) { api.status(err.message, true); return; }
   open(info, r);
 }
 
@@ -209,6 +230,13 @@ const DEFAULTS = {
   CLOT: { ctype: 2, parts: [] },
   MISC: { mflags: 0 },
   BOOK: { scroll: 0, skill: -1, text: '' },
+  ALCH: { auto: true, effects: [] },
+  INGR: { effects: [] },
+  LIGH: { time: -1, radius: 128, color: [255, 200, 120], lflags: 1, sound: '' },
+  CONT: { capacity: 100 },
+  STAT: {},
+  ACTI: {},
+  DOOR: { open_sound: '', close_sound: '' },
 };
 
 function open(info, r, place = null) {
@@ -342,15 +370,51 @@ function open(info, r, place = null) {
         build();
       });
     }
-    text('name', 'Name', { max: 31, after: () => { if (isNew && !f.idTouched) { f.id = idFrom(f.name); idBox.value = f.id; } } });
+    const carried = CARRIED.includes(f.kind);
+    if (f.kind !== 'STAT') {
+      text('name', f.kind === 'ACTI' || f.kind === 'DOOR' ? 'Name (shown when pointed at)' : 'Name',
+           { max: 31, after: () => { if (isNew && !f.idTouched) { f.id = idFrom(f.name); idBox.value = f.id; } } });
+    }
     const idBox = isNew ? text('id', 'ID', { max: 31, after: () => { f.idTouched = true; } }) : null;
     file('model', 'Model', 'meshes', () => view.show(f.model));
-    file('icon', 'Icon', 'icons', showIcon);
-    num('value', 'Value', { min: 0 });
-    num('weight', 'Weight', { step: 0.1, min: 0 });
-    text('script', 'Script', { placeholder: 'None', list: 'item-scripts', pick: (cur) => choose({
-      title: 'Choose a script', items: listData.scripts.map((s) => ({ id: s })), current: cur, none: 'No script' }) });
-    if (f.kind !== 'MISC') {
+    if (carried) {
+      file('icon', 'Icon', 'icons', showIcon);
+      num('value', 'Value', { min: 0 });
+      num('weight', 'Weight', { step: 0.1, min: 0 });
+    }
+    if (f.kind !== 'STAT' && f.kind !== 'CONT') {
+      text('script', 'Script', { placeholder: 'None', list: 'item-scripts', pick: (cur) => choose({
+        title: 'Choose a script', items: listData.scripts.map((s) => ({ id: s })), current: cur, none: 'No script' }) });
+    }
+    if (f.kind === 'LIGH') {
+      num('radius', 'Radius', { min: 0 });
+      const c = el('input');
+      c.type = 'color';
+      c.value = '#' + (f.color || [255, 255, 255]).map((v) => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, '0')).join('');
+      c.addEventListener('input', () => { f.color = [1, 3, 5].map((i) => parseInt(c.value.slice(i, i + 2), 16)); });
+      row('Colour', c);
+      num('time', 'Burns for (seconds; -1: always)', { min: -1 });
+      text('sound', 'Sound', { placeholder: 'None, e.g. Fire' });
+      for (const [bit, label] of LIGHT_FLAGS) flag('lflags', bit, label);
+    } else if (f.kind === 'DOOR') {
+      text('open_sound', 'Opening sound', { placeholder: 'None, e.g. Door Stone Open' });
+      text('close_sound', 'Closing sound', { placeholder: 'None, e.g. Door Stone Close' });
+    } else if (f.kind === 'CONT') {
+      num('capacity', 'Holds (weight)', { min: 0 });
+      form.appendChild(el('div', 'npc-hint', 'Put things in it with Contents…, once it stands in a cell.'));
+    } else if (f.kind === 'ALCH' || f.kind === 'INGR') {
+      if (f.kind === 'ALCH') {
+        const l = form.appendChild(el('label', 'check'));
+        const c = l.appendChild(el('input'));
+        c.type = 'checkbox';
+        c.checked = !!f.auto;
+        c.disabled = !editable;
+        c.addEventListener('change', () => { f.auto = c.checked; });
+        l.append(' The game works out its value');
+      }
+      effectRows(form, f, editable);
+    }
+    if (ENCHANTED.includes(f.kind)) {
       const about = el('div', 'npc-hint it-effects');
       const allEnchants = () => [...api.magic().newEnchants(), ...listData.enchants];
       const showEffects = () => {
@@ -456,6 +520,7 @@ function open(info, r, place = null) {
   q('.it-done').addEventListener('click', async () => {
     if (!editable) { close(); return; }
     const out = clean(f);
+    if (f.kind === 'ALCH' && !out.effects.length) { q('.it-note').textContent = 'A potion needs at least one effect.'; return; }
     if (isNew) {
       if (!out.model) { q('.it-note').textContent = 'Choose a model first.'; return; }
       const res = await fetch('/api/item/new-id', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -463,7 +528,7 @@ function open(info, r, place = null) {
       out.id = (await res.json()).id;
       close();
       record(null, { ...out, new: true });
-      (place || api.place)({ id: out.id, name: out.name, type: KINDS[out.kind], mesh: out.model });
+      (place || api.place)({ id: out.id, name: out.name || '', type: KINDS[out.kind], mesh: out.model });
       return;
     }
     const before = JSON.stringify(clean(info));
@@ -485,14 +550,76 @@ function open(info, r, place = null) {
   });
 }
 
+// A potion's or an ingredient's effects: the effect, what it's about, and for a potion how strong and how long
+function effectRows(form, f, editable) {
+  const potion = f.kind === 'ALCH', most = potion ? 8 : 4;
+  form.appendChild(el('div', 'mg-head', potion ? 'Effects' : 'Effects (found by alchemy skill, in this order)'));
+  const box = form.appendChild(el('div', 'it-fx'));
+  magicInfo.then((info) => {
+    const draw = () => {
+      box.innerHTML = '';
+      f.effects.forEach((e, i) => {
+        const d = info.effects[e.effect] || info.effects[0];
+        const line = box.appendChild(el('div', 'mg-effect'));
+        const top = line.appendChild(el('div', 'mg-row'));
+        const s = top.appendChild(el('select', 'mg-name'));
+        [...info.effects].sort((a, b) => a.name.localeCompare(b.name)).forEach((x) => s.add(new Option(x.name, String(x.index))));
+        s.value = String(d.index);
+        s.addEventListener('change', () => { e.effect = Number(s.value); e.skill = e.attribute = -1; draw(); });
+        for (const [k, names] of [['skill', info.skills], ['attribute', info.attributes]]) {
+          if (!d[k]) continue;
+          const t = top.appendChild(el('select'));
+          names.forEach((n, j) => t.add(new Option(n, String(j))));
+          if (!(e[k] >= 0)) e[k] = 0;
+          t.value = String(e[k]);
+          t.disabled = !editable;
+          t.addEventListener('change', () => { e[k] = Number(t.value); });
+        }
+        const rm = top.appendChild(el('button', 'ghost icon'));
+        rm.innerHTML = icon('x');
+        rm.addEventListener('click', (ev) => { ev.preventDefault(); f.effects.splice(i, 1); draw(); });
+        s.disabled = rm.disabled = !editable;
+        if (!potion) return;
+        const nums = line.appendChild(el('div', 'mg-row mg-nums'));
+        for (const [k, label, on] of [['min', 'From', d.magnitude], ['max', 'to', d.magnitude], ['duration', 'for (seconds)', d.duration]]) {
+          if (!on) continue;
+          const l = nums.appendChild(el('label'));
+          l.append(label + ' ');
+          const n = l.appendChild(el('input'));
+          n.type = 'number';
+          n.min = 0;
+          n.value = e[k] ?? 0;
+          n.disabled = !editable;
+          n.addEventListener('input', () => { e[k] = Number(n.value) || 0; if (k === 'min' && e.max < e.min) e.max = e.min; });
+        }
+      });
+      const add = box.appendChild(el('button', null, 'Add effect'));
+      add.disabled = !editable || f.effects.length >= most;
+      add.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        f.effects.push(potion ? { effect: 75, skill: -1, attribute: -1, range: 0, area: 0, duration: 5, min: 5, max: 5 }
+          : { effect: 75, skill: -1, attribute: -1 });
+        draw();
+      });
+    };
+    f.effects = f.effects || [];
+    draw();
+  });
+}
+
 // an enchantment as an item's tooltip tells it: how it's cast, its effects, its charge
 const enchantLines = (e) => [e.type, ...(e.effects || []), ...(e.charge != null ? [`Charge: ${e.charge}`] : [])];
 
 // the item's fields as they're stored (the editor's helpers left out)
 function clean(f) {
-  const keep = ['kind', 'id', 'name', 'model', 'icon', 'script', 'enchant', 'weight', 'value', 'enchant_pts'];
-  const more = { WEAP: Object.keys(DEFAULTS.WEAP), ARMO: ['atype', 'health', 'rating', 'parts'], CLOT: ['ctype', 'parts'],
-                 MISC: ['mflags'], BOOK: ['scroll', 'skill', 'text'] }[f.kind] || [];
+  const other = { ALCH: ['name', 'icon', 'script', 'weight', 'value', 'auto', 'effects'],
+                  INGR: ['name', 'icon', 'script', 'weight', 'value', 'effects'],
+                  LIGH: ['name', 'icon', 'script', 'sound', 'weight', 'value', 'time', 'radius', 'color', 'lflags'],
+                  CONT: ['name', 'capacity'], STAT: [], ACTI: ['name', 'script'],
+                  DOOR: ['name', 'script', 'open_sound', 'close_sound'] }[f.kind];
+  const keep = other ? ['kind', 'id', 'model'] : ['kind', 'id', 'name', 'model', 'icon', 'script', 'enchant', 'weight', 'value', 'enchant_pts'];
+  const more = other || { WEAP: Object.keys(DEFAULTS.WEAP), ARMO: ['atype', 'health', 'rating', 'parts'], CLOT: ['ctype', 'parts'],
+                          MISC: ['mflags'], BOOK: ['scroll', 'skill', 'text'] }[f.kind] || [];
   const out = {};
   for (const k of [...keep, ...more]) if (f[k] !== undefined) out[k] = k === 'parts' ? f[k].filter((p) => p[1] || p[2]) : f[k];
   return out;
@@ -502,7 +629,10 @@ function clean(f) {
 function record(r, entry, key = entry.id.toLowerCase()) {
   const { state } = api;
   const before = api.entriesOf(state.edits);
-  state.edits.items[key] = entry;
+  if (entry.kind === 'CONT') {
+    state.edits.containers[key] = { new: true, id: entry.id, name: entry.name || '', model: entry.model,
+                                    capacity: entry.capacity ?? 100, contents: [], respawn: false };
+  } else state.edits.items[key] = entry;
   if (r) {
     if (r.origin === 'added') state.edits.added.find((a) => 'added|' + a.uid === r.key).id = entry.id;
     else state.edits.replaced[r.key] = entry.id;
@@ -511,5 +641,5 @@ function record(r, entry, key = entry.id.toLowerCase()) {
   if (diff.length) state.undo.push({ diff });
   api.changed(r ? r.key : null);
   api.status(r ? `${entry.name || entry.id}: this one is now ${entry.id}, a copy of ${entry.copy_of}.`
-    : entry.new && !state.edits.items[key].copy_of ? `Made ${entry.name || entry.id}.` : `Changed ${entry.name || entry.id}.`);
+    : entry.new && !entry.copy_of ? `Made ${entry.name || entry.id}.` : `Changed ${entry.name || entry.id}.`);
 }

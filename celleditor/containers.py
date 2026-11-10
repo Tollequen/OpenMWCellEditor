@@ -33,6 +33,15 @@ def encode(subs, fields):
     return out
 
 
+def blank(patch):
+    """A container made from scratch: (subrecords, fields) from its entry's id, name, model and capacity."""
+    subs = [("NAME", zstr(patch["id"])), ("MODL", zstr(patch.get("model") or ""))]
+    if patch.get("name"):
+        subs.append(("FNAM", zstr(patch["name"])))
+    subs += [("CNDT", struct.pack("<f", float(patch.get("capacity", 100)))), ("FLAG", struct.pack("<i", 8))]
+    return subs, apply(parse(subs), patch)
+
+
 def apply(fields, patch):
     """A container's fields with the edits' changes."""
     return dict(fields, **{k: v for k, v in patch.items() if k in ("contents", "respawn")})
@@ -57,6 +66,8 @@ class Containers:
         """A container as the edits have it: fields, file, editable; None if there's no such container."""
         edits = edits or {}
         patch = edits.get(oid.lower())
+        if patch and patch.get("new") and not patch.get("copy_of"):
+            return dict(blank(patch)[1], file=None, editable=True)
         if patch and patch.get("new"):
             base = self._record(patch["copy_of"])
             if base is None:
@@ -88,17 +99,23 @@ class Containers:
             items.update({k: v for k, v in self.index.where(tag).items() if k not in items})
         for key, patch in sorted(edits.items()):
             if patch.get("new"):
-                base = self._record(patch["copy_of"])
-                if base is None:
-                    raise ValueError("The container %s that %s copies isn't in the load order." % (
-                        patch["copy_of"], patch["id"]))
                 if not patch["id"] or len(patch["id"]) > MAX_ID or patch["id"].lower() != key:
-                    raise ValueError("A container copy's id must be 1-%d letters: %r" % (MAX_ID, patch["id"]))
+                    raise ValueError("A new container's id must be 1-%d letters: %r" % (MAX_ID, patch["id"]))
                 taken = self.index.find(patch["id"])
                 if taken:
-                    raise ValueError("The container copy %s has the id of %s in %s." % (patch["id"], *taken))
-                (w, flags, subs) = base
-                fields = apply(dict(parse(subs), id=patch["id"]), patch)          # a whole record: no master needed
+                    raise ValueError("The new container %s has the id of %s in %s." % (patch["id"], *taken))
+                if patch.get("copy_of"):
+                    base = self._record(patch["copy_of"])
+                    if base is None:
+                        raise ValueError("The container %s that %s copies isn't in the load order." % (
+                            patch["copy_of"], patch["id"]))
+                    (w, flags, subs) = base
+                    fields = apply(dict(parse(subs), id=patch["id"]), patch)      # a whole record: no master needed
+                else:
+                    if not patch.get("model"):
+                        raise ValueError("The new container %s needs a model." % patch["id"])
+                    flags = 0
+                    subs, fields = blank(patch)
             else:
                 found = self._record(key)
                 if found is None:

@@ -1,11 +1,14 @@
-"""Item records (weapons, armour, clothing, misc items, books): read, changed, created and written."""
+"""Item and object records (weapons, armour, clothing, misc items, books, potions, ingredients, lights, statics,
+activators, doors): read, changed, created and written."""
 import struct
 
-from . import esp
+from . import esp, magic
 from .esp import cstr, zstr
 
 MAX_ID = 31
-KINDS = {"WEAP": "Weapon", "ARMO": "Armor", "CLOT": "Clothing", "MISC": "Misc", "BOOK": "Book"}
+KINDS = {"WEAP": "Weapon", "ARMO": "Armor", "CLOT": "Clothing", "MISC": "Misc", "BOOK": "Book", "ALCH": "Potion",
+         "INGR": "Ingredient", "LIGH": "Light", "STAT": "Static", "ACTI": "Activator", "DOOR": "Door"}
+CARRIED = ("WEAP", "ARMO", "CLOT", "MISC", "BOOK", "ALCH", "INGR", "LIGH")       # kinds an inventory can hold
 
 # Each kind's data subrecord: (name, struct format, field names) (components/esm3/load*.hpp)
 DATA = {
@@ -28,9 +31,27 @@ DEFAULTS = {
 COMMON = ("id", "name", "model", "icon", "script", "enchant", "weight", "value", "enchant_pts")
 WEARABLE = ("ARMO", "CLOT")
 
+# The other kinds: their fields, and what a new one starts with (components/esm3/loadalch, loadingr, loadligh,
+# loadstat, loadacti, loaddoor). A light's flags: 1 dynamic, 2 carried, 4 negative, 8 flicker, 16 fire, 32 off by
+# default, 64 slow flicker, 128 pulse, 256 slow pulse. An ingredient has up to 4 effects {effect, skill, attribute}.
+OTHER = {
+    "ALCH": (("id", "name", "model", "icon", "script", "weight", "value", "auto", "effects"),
+             {"weight": 1.0, "value": 1, "auto": True, "effects": []}),
+    "INGR": (("id", "name", "model", "icon", "script", "weight", "value", "effects"),
+             {"weight": 0.1, "value": 1, "effects": []}),
+    "LIGH": (("id", "name", "model", "icon", "script", "sound", "weight", "value", "time", "radius", "color", "lflags"),
+             {"weight": 1.0, "value": 1, "time": -1, "radius": 128, "color": [255, 200, 120], "lflags": 1}),
+    "STAT": (("id", "model"), {}),
+    "ACTI": (("id", "name", "model", "script"), {}),
+    "DOOR": (("id", "name", "model", "script", "open_sound", "close_sound"), {}),
+}
+TEXTS = ("name", "model", "icon", "script", "sound", "open_sound", "close_sound")
+
 
 def fields_of(kind):
     """The fields an item of a kind has."""
+    if kind in OTHER:
+        return set(OTHER[kind][0])
     return set(COMMON) | set(DATA[kind][2]) | ({"parts"} if kind in WEARABLE else set()) | (
         {"text"} if kind == "BOOK" else set())
 
@@ -38,6 +59,8 @@ def fields_of(kind):
 def parse(kind, subs):
     """An item record's fields."""
     d = dict(subs)
+    if kind in OTHER:
+        return _parse_other(kind, subs, d)
     data_name, fmt, names = DATA[kind]
     raw = d.get(data_name, b"").ljust(struct.calcsize(fmt), b"\0")[:struct.calcsize(fmt)]
     f = dict(zip(names, struct.unpack(fmt, raw)))
@@ -61,6 +84,11 @@ def parse(kind, subs):
 
 def new_fields(kind, oid):
     """A new item's fields: the kind's defaults."""
+    if kind in OTHER:
+        names, start = OTHER[kind]
+        f = {k: "" for k in names if k in TEXTS}
+        f.update(kind=kind, id=oid, **{k: (list(v) if isinstance(v, list) else v) for k, v in start.items()})
+        return f
     f = {k: "" for k in ("name", "model", "icon", "script", "enchant")}
     f.update(kind=kind, id=oid, weight=1.0, value=1, enchant_pts=0, **DEFAULTS[kind])
     if kind in WEARABLE:
@@ -77,6 +105,8 @@ def apply(fields, patch):
 def encode(f):
     """An item's subrecords in the order OpenMW writes them."""
     kind = f["kind"]
+    if kind in OTHER:
+        return _encode_other(kind, f)
     data_name, fmt, names = DATA[kind]
     vals = []
     for n, c in zip(names, fmt[1:]):
@@ -101,6 +131,70 @@ def encode(f):
     if f.get("enchant") and kind != "MISC":
         out.append(("ENAM", zstr(f["enchant"])))
     return out
+
+
+def _parse_other(kind, subs, d):
+    text = lambda s_: cstr(d.get(s_, b""))                                      # noqa: E731
+    f = {"kind": kind, "id": text("NAME"), "model": text("MODL")}
+    if kind != "STAT":
+        f.update(name=text("FNAM"), script=text("SCRI"))
+    if kind == "DOOR":
+        f.update(open_sound=text("SNAM"), close_sound=text("ANAM"))
+    elif kind == "LIGH":
+        raw = d.get("LHDT", b"").ljust(24, b"\0")[:24]
+        weight, value, time, radius = struct.unpack_from("<fiii", raw)
+        f.update(icon=text("ITEX"), sound=text("SNAM"), weight=round(weight, 4), value=value, time=time, radius=radius,
+                 color=list(raw[16:19]), lflags=struct.unpack_from("<i", raw, 20)[0])
+    elif kind == "ALCH":
+        weight, value, flags = struct.unpack("<fii", d.get("ALDT", b"").ljust(12, b"\0")[:12])
+        f.update(icon=text("TEXT"), weight=round(weight, 4), value=value, auto=bool(flags & 1),
+                 effects=magic.parse_effects(subs))
+    elif kind == "INGR":
+        raw = struct.unpack("<fi12i", d.get("IRDT", b"").ljust(56, b"\0")[:56])
+        f.update(icon=text("ITEX"), weight=round(raw[0], 4), value=raw[1],
+                 effects=[{"effect": raw[2 + i], "skill": raw[6 + i], "attribute": raw[10 + i]}
+                          for i in range(4) if raw[2 + i] >= 0])
+    return f
+
+
+def _encode_other(kind, f):
+    opt = lambda s_, k: [(s_, zstr(f[k]))] if f.get(k) else []                    # noqa: E731
+    out = [("NAME", zstr(f["id"])), ("MODL", zstr(f["model"]))]
+    if kind == "STAT":
+        return out
+    if kind == "ACTI":
+        return out + opt("FNAM", "name") + opt("SCRI", "script")
+    if kind == "DOOR":
+        return out + opt("FNAM", "name") + opt("SCRI", "script") + opt("SNAM", "open_sound") + opt("ANAM", "close_sound")
+    if kind == "LIGH":
+        r, g, b = ([max(0, min(255, int(c))) for c in f.get("color") or ()] + [0, 0, 0])[:3]
+        data = struct.pack("<fiii4Bi", float(f.get("weight", 0)), int(f.get("value", 0)), int(f.get("time", 0)),
+                           int(f.get("radius", 0)), r, g, b, 0, int(f.get("lflags", 0)))
+        return out + opt("FNAM", "name") + opt("ITEX", "icon") + [("LHDT", data)] + opt("SCRI", "script") + opt(
+            "SNAM", "sound")
+    if kind == "ALCH":
+        data = struct.pack("<fii", float(f.get("weight", 0)), int(f.get("value", 0)), 1 if f.get("auto") else 0)
+        return out + opt("TEXT", "icon") + opt("SCRI", "script") + opt("FNAM", "name") + [("ALDT", data)] + [
+            ("ENAM", magic.encode_effect(e)) for e in f.get("effects") or []]
+    fx = list(f.get("effects") or [])[:4]
+    col = lambda k: [int(e.get(k, -1)) for e in fx] + [-1] * (4 - len(fx))      # noqa: E731
+    data = struct.pack("<fi12i", float(f.get("weight", 0)), int(f.get("value", 0)), *col("effect"), *col("skill"),
+                       *col("attribute"))
+    return out + opt("FNAM", "name") + [("IRDT", data)] + opt("SCRI", "script") + opt("ITEX", "icon")
+
+
+def _check_other(f):
+    """Raise ValueError if a potion's or ingredient's effects can't be written."""
+    kind, fx = f["kind"], f.get("effects") or []
+    if kind == "ALCH" and not 1 <= len(fx) <= magic.MAX_EFFECTS:
+        raise ValueError("The potion %s needs 1-%d effects." % (f["id"], magic.MAX_EFFECTS))
+    if kind == "INGR" and len(fx) > 4:
+        raise ValueError("The ingredient %s can have 4 effects at most." % f["id"])
+    for e in fx if kind in ("ALCH", "INGR") else ():
+        if not 0 <= int(e.get("effect", -1)) < len(magic.EFFECTS):
+            raise ValueError("%s has an effect the game doesn't know." % f["id"])
+        if kind == "ALCH" and int(e.get("min", 0)) > int(e.get("max", 0)):
+            raise ValueError("In %s, an effect's least magnitude is more than its most." % f["id"])
 
 
 class Items:
@@ -174,6 +268,9 @@ class Items:
                     raise ValueError("The item %s comes from %s, which this plugin can't use." % (key, w[0].name))
                 f = apply(parse(kind, subs), patch)
                 need.setdefault(w[0].name, []).append("%s changed" % f["id"])
+            _check_other(f)
+            for k in ("sound", "open_sound", "close_sound"):
+                uses(f.get(k), "SOUN", "%s's sound" % f["id"])
             uses(f.get("script"), "SCPT", "%s's script" % f["id"])
             uses(f.get("enchant"), "ENCH", "%s's enchantment" % f["id"])
             for _, male, female in f.get("parts") or []:

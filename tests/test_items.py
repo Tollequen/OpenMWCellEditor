@@ -35,6 +35,36 @@ class Items(unittest.TestCase):
         esp.release()
         shutil.rmtree(self.dir)
 
+    def test_other_kinds_are_written_and_read_back(self):
+        potion = {"new": True, "kind": "ALCH", "id": "my_potion", "name": "My Potion", "model": "m\\p.nif",
+                  "icon": "m\\p.tga", "weight": 0.5, "value": 20, "auto": False,
+                  "effects": [{"effect": 75, "skill": -1, "attribute": -1, "range": 0, "area": 0, "duration": 5,
+                               "min": 2, "max": 4}]}
+        light = {"new": True, "kind": "LIGH", "id": "my_lamp", "name": "My Lamp", "model": "l\\l.nif", "radius": 200,
+                 "color": [10, 20, 30], "lflags": 3, "time": 600}
+        edits = {"my_potion": potion, "my_lamp": light,
+                 "my_rock": {"new": True, "kind": "STAT", "id": "my_rock", "model": "x\\rock.nif"},
+                 "my_door": {"new": True, "kind": "DOOR", "id": "my_door", "name": "Door", "model": "d\\d.nif"},
+                 "my_root": {"new": True, "kind": "INGR", "id": "my_root", "name": "Root", "model": "n\\r.nif",
+                             "effects": [{"effect": 75, "skill": -1, "attribute": -1}]}}
+        recs, _ = self.it.records(edits)
+        self.assertEqual([k for k, _ in recs], [("DOOR", "my_door"), ("LIGH", "my_lamp"), ("ALCH", "my_potion"),
+                                                ("STAT", "my_rock"), ("INGR", "my_root")])
+        out = os.path.join(self.dir, "Out.esp")
+        with open(out, "wb") as f:
+            f.write(writer.plugin_bytes([rec for _, rec in recs], [self.esm]))
+        read = [(tag, subs) for tag, _, subs in esp.esm_records(out) if tag in items.KINDS]
+        for ((kind, key), _), (tag, subs) in zip(recs, read):
+            self.assertEqual(tag, kind)
+            back = items.parse(kind, [(s_, bytes(v)) for s_, v in subs])
+            for k, v in edits[key].items():
+                if k != "new":
+                    self.assertEqual(back[k], v, (key, k))
+        self.assertEqual(items.encode(items.parse("STAT", [("NAME", zstr("a")), ("MODL", zstr("b.nif"))])),
+                         [("NAME", zstr("a")), ("MODL", zstr("b.nif"))])
+        with self.assertRaises(ValueError):
+            self.it.records({"p": {"new": True, "kind": "ALCH", "id": "p", "model": "m.nif", "effects": []}})
+
     def test_unchanged_records_come_back_byte_for_byte(self):
         for kind, subs in (("WEAP", SWORD), ("CLOT", SHIRT)):
             self.assertEqual(items.encode(items.parse(kind, subs)), subs)
