@@ -9,7 +9,7 @@ import time
 
 from .settings import Settings
 
-SECTIONS = ("moved", "replaced", "attached", "doors", "groups", "npcs", "dialogue", "props", "containers", "items", "cells")
+SECTIONS = ("moved", "replaced", "attached", "doors", "groups", "npcs", "dialogue", "props", "containers", "items", "cells", "magic")
 
 
 def entries(edits):
@@ -28,7 +28,7 @@ def entries(edits):
 def edits_of(ents):
     """Entries back into edits."""
     e = {"moved": {}, "deleted": [], "replaced": {}, "added": [], "attached": {}, "doors": {}, "groups": {},
-         "npcs": {}, "dialogue": {}, "props": {}, "containers": {}, "items": {}, "cells": {}}
+         "npcs": {}, "dialogue": {}, "props": {}, "containers": {}, "items": {}, "cells": {}, "magic": {}}
     for i, v in ents.items():
         section, key = i.split("|", 1)
         if section == "deleted":

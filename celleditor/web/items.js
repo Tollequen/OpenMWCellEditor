@@ -352,13 +352,27 @@ function open(info, r, place = null) {
       title: 'Choose a script', items: listData.scripts.map((s) => ({ id: s })), current: cur, none: 'No script' }) });
     if (f.kind !== 'MISC') {
       const about = el('div', 'npc-hint it-effects');
+      const allEnchants = () => [...api.magic().newEnchants(), ...listData.enchants];
       const showEffects = () => {
-        const e = f.enchant && listData.enchants.find((x) => x.id.toLowerCase() === f.enchant.toLowerCase());
+        const e = f.enchant && allEnchants().find((x) => x.id.toLowerCase() === f.enchant.toLowerCase());
         about.textContent = e ? enchantLines(e).join('\n') : f.enchant ? 'No enchantment has this id.' : '';
       };
-      text('enchant', 'Enchantment', { placeholder: 'None', after: showEffects, pick: (cur) => choose({
+      const box = text('enchant', 'Enchantment', { placeholder: 'None', after: showEffects, pick: (cur) => choose({
         title: 'Choose an enchantment', current: cur, none: 'No enchantment',
-        items: listData.enchants.map((e) => ({ id: e.id, type: e.type, note: (e.effects || []).join(', '), detail: enchantLines(e).slice(1) })) }) });
+        items: allEnchants().map((e) => ({ id: e.id, type: e.type, note: (e.effects || []).join(', '), detail: enchantLines(e).slice(1) })) }) });
+      if (editable) {
+        const make = el('button', null, 'New…');
+        make.title = 'Make a new enchantment for it';
+        make.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const id = await api.magic().create({ kind: 'ENCH', type: f.kind === 'WEAP' ? 1 : f.kind === 'BOOK' ? 0 : 3 });
+          if (!id) return;
+          f.enchant = id;
+          box.value = id;
+          setTimeout(showEffects, 300);
+        });
+        box.closest('.pick-wrap').appendChild(make);
+      }
       form.appendChild(about);
       showEffects();
     }

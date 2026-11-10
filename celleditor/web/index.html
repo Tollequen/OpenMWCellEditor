@@ -362,6 +362,21 @@
   .rb-cell:hover .rb-del { display: inline-flex; }
   .rb-keys { font-size: 11px; line-height: 1.5; }
   .rb-empty { padding: 10px 12px; }
+  .dialog.magic-dialog { width: min(640px, 100%); display: flex; flex-direction: column; gap: 6px; max-height: 92vh; overflow-y: auto; }
+  .mg-form label.opt > span { flex: none; width: 120px; color: var(--dim); font-size: 12px; }
+  .mg-form label.opt > input, .mg-form label.opt > select, .mg-form label.opt > .pick-wrap { flex: 1; min-width: 0; width: auto; }
+  .mg-head { font-weight: 600; margin: 8px 0 4px; }
+  .mg-effect { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 6px; margin-bottom: 6px; }
+  .mg-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .mg-row .mg-name { flex: 1; min-width: 160px; }
+  .mg-nums { margin-top: 6px; color: var(--dim); font-size: 12px; }
+  .mg-nums label { display: flex; align-items: center; gap: 4px; }
+  .mg-nums input { width: 64px; }
+  .mg-preview { background: var(--field); border-radius: var(--radius); padding: 8px 10px; min-height: 20px; }
+  .mg-p-type { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+  .mg-p-line { margin: 2px 0; }
+  .magic-dialog .bar .spacer { flex: 1; }
+  .it-form .pick-wrap > button:not(.pick-btn) { flex: none; padding: 3px 8px; }
   .dialog.ask-dialog { width: min(380px, 100%); display: flex; flex-direction: column; gap: 10px; }
   #qa-snaps { display: flex; gap: 4px; flex: none; }
   #qa-snaps:not(:first-child) { padding-left: 6px; border-left: 1px solid var(--line-soft); }

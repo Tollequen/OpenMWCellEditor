@@ -10,7 +10,7 @@ import struct
 import sys
 from contextlib import redirect_stdout
 
-from . import cells as cells_, containers, items, dialogue as dial, esp, launcher, loadorder, models, npc, writer
+from . import cells as cells_, containers, items, magic, dialogue as dial, esp, launcher, loadorder, models, npc, writer
 
 DEFAULTS = {
     "name": None,
@@ -217,6 +217,23 @@ class Project:
             return [], {}
         return self.items().records(edits)
 
+    def magic_records(self):
+        """The new enchantments' and spells' records; raises ValueError."""
+        out = []
+        index = self.npcs()
+        for key, m in sorted((self.load_edits().get("magic") or {}).items()):
+            if not m.get("new"):
+                continue
+            magic.check(m)
+            if m["id"].lower() != key:
+                raise ValueError("The new %s is stored under another id." % m["id"])
+            w = index.where(m["kind"]).get(key)
+            if w:
+                raise ValueError("The new %s has the id of %s in %s: give it another id." % (
+                    m["id"], "an enchantment" if m["kind"] == "ENCH" else "a spell", w[0].name))
+            out.append(((m["kind"], key), esp.record(m["kind"], [esp.sub(s, v) for s, v in magic.encode(m)])))
+        return out
+
     def records_and_needs(self):
         """The plugin's object records [((tag, id), record)] (NPCs, containers), dialogue groups, and the files
         they need."""
@@ -228,7 +245,8 @@ class Project:
         for extra in (more_c, more_i, more):
             for k, v in extra.items():
                 need.setdefault(k, []).extend(v)
-        return ([(("NPC_", k), rec) for k, rec in npcs] + [(("CONT", k), rec) for k, rec in conts] + things,
+        return ([(("NPC_", k), rec) for k, rec in npcs] + [(("CONT", k), rec) for k, rec in conts] + things
+                + self.magic_records(),
                 groups, need)
 
     def _records_load(self):

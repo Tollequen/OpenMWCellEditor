@@ -11,6 +11,7 @@ import { setSuggestions, suggest } from './suggest.js';
 import { setupContents } from './contents.js';
 import { setupItems } from './items.js';
 import { setupCells } from './cells.js';
+import { setupMagic } from './magic.js';
 import { setupChoose, choose, withChooser } from './choose.js';
 import { setupGamepad } from './gamepad.js';
 
@@ -933,7 +934,7 @@ setupChoose({ icon: itemIcon });
 const contentsWin = setupContents({ state, status, icon: itemIcon, entriesOf, diffOf,
                                     changed: () => { updatePanel(); updateDirty(); },
                                     newItems: () => itemsWin.newItems() });
-const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, entriesOf, diffOf,
+const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, entriesOf, diffOf, magic: () => magicWin,
                               changed: () => { updatePanel(); updateDirty(); refreshCell(); },
                               place: (o) => startPlacing('object', { o, opts: {} }) });
 const cellsWin = setupCells({ state, status, entriesOf, diffOf, changed: (ids) => showChanges(ids, false),
@@ -1531,6 +1532,7 @@ function canonical(e) {
     containers: entries(e.containers, (v) => JSON.stringify(sortedKeys(v))),
     items: entries(e.items, (v) => JSON.stringify(sortedKeys(v))),
     cells: entries(e.cells, (v) => JSON.stringify(sortedKeys(v))),
+    magic: entries(e.magic, (v) => JSON.stringify(sortedKeys(v))),
   });
 }
 
@@ -1564,7 +1566,7 @@ function updateDirty() {
 
 function withSections(e) {
   return Object.assign({ moved: {}, deleted: [], replaced: {}, added: [], attached: {}, doors: {}, groups: {}, npcs: {}, dialogue: {},
-                         props: {}, containers: {}, items: {}, cells: {} }, e);
+                         props: {}, containers: {}, items: {}, cells: {}, magic: {} }, e);
 }
 
 function offerDraft() {
@@ -4656,8 +4658,9 @@ $('save').addEventListener('click', save);
 
 // --- NPCs ------------------------------------------------------------------
 
+const magicWin = setupMagic({ state, status, entriesOf, diffOf, changed: () => { updatePanel(); updateDirty(); } });
 const npcEditor = setupNpcEditor({
-  state, status, save, changed: updateDirty, closed: resumeFlySoon, newItems: () => itemsWin.newItems(),
+  state, status, save, changed: updateDirty, closed: resumeFlySoon, newItems: () => itemsWin.newItems(), magic: magicWin,
   preview: { canvas: npcViewCanvas, show: showNpcPreview, face: npcPreviewFace, whole: npcPreviewWhole },
   icon: itemIcon,
   async placeCopy(n, fromId) {
@@ -4817,7 +4820,7 @@ const listText = (xs) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).
 function changesText(before, after) {
   const sets = { moved: new Set(), added: new Set(), deleted: new Set(), swapped: new Set(), restored: new Set(),
                  doors: new Set(), npcs: new Set(), responses: new Set(), props: new Set(), containers: new Set(), items: new Set(),
-                 cells: new Set(), other: new Set() };
+                 cells: new Set(), magic: new Set(), other: new Set() };
   for (const { id } of diffOf(before, after)) {
     const [sec, k] = splitId(id);
     if (sec === 'added') sets[!before.has(id) ? 'added' : !after.has(id) ? 'deleted' : 'moved'].add(id);
@@ -4831,6 +4834,7 @@ function changesText(before, after) {
     else if (sec === 'containers') sets.containers.add(k);
     else if (sec === 'items') sets.items.add(k);
     else if (sec === 'cells') sets.cells.add(k);
+    else if (sec === 'magic') sets.magic.add(k);
     else sets.other.add(k);
   }
   for (const k of sets.deleted) sets.moved.delete(k);
@@ -4843,6 +4847,7 @@ function changesText(before, after) {
   if (sets.containers.size) parts.push(`contents of ${n(sets.containers, 'container', 'containers')} changed`);
   if (sets.items.size) parts.push(`${n(sets.items, 'item', 'items')} made or changed`);
   if (sets.cells.size) parts.push(`${n(sets.cells, 'cell', 'cells')} made or changed`);
+  if (sets.magic.size) parts.push(`${n(sets.magic, 'enchantment or spell', 'enchantments and spells')} made`);
   if (sets.npcs.size) parts.push(`${n(sets.npcs, 'NPC', 'NPCs')} changed`);
   if (sets.responses.size) parts.push(`${n(sets.responses, 'response', 'responses')} changed`);
   if (!parts.length && sets.other.size) parts.push('attached or grouped objects changed');
@@ -5144,7 +5149,7 @@ function sendPicture(saved) {
 const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 const live = { shared: new Map(), sent: new Map(), timer: null, sending: null, again: false, ready: false,
                others: new Map(), lastWhere: '', whereAt: 0, refreshing: false, refreshAgain: false };
-const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers', 'items', 'cells'];
+const SECTIONS = ['moved', 'replaced', 'attached', 'doors', 'groups', 'npcs', 'dialogue', 'props', 'containers', 'items', 'cells', 'magic'];
 const UA = navigator.userAgent;
 const DEVICE = /iPhone/.test(UA) ? 'iPhone' : /iPad/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1) ? 'iPad'
   : /Android/.test(UA) ? (/Mobile/.test(UA) ? 'Android phone' : 'Android tablet') : 'Computer';
@@ -5632,6 +5637,7 @@ function openFailed(detail) {
   state.objectFavorites = state.data.objectFavorites || [];
   state.recentObjects = state.data.recentObjects || [];
   updateDirty();
+  magicWin.refresh();
   setupProject();
   await loadProjectModule();
   const known = (c) => c && state.data.cells.some((x) => x.name === c);

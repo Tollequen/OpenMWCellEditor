@@ -10,7 +10,7 @@ import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import actor, cells as cells_, desktop, esp, pieces, geometry, items, launcher, mcp, models, nif, npc, qr, writer
+from . import actor, cells as cells_, desktop, esp, geometry, items, launcher, magic, mcp, models, nif, npc, pieces, qr, writer
 from .gamedata import openmw_cfg, read_cfg
 from .history import History, states
 from .live import LIVE
@@ -802,6 +802,46 @@ def room_sets(sets=None):
     return SETTINGS.get("room_sets", []) if SETTINGS else _room_sets
 
 
+def _wording():
+    with LOCK:
+        index = project.npcs()
+    return magic.Wording(index._gmst_text, npc.ATTRIBUTES, npc.SKILLS)
+
+
+def magic_info():
+    """What the enchantment and spell editor chooses from."""
+    w = _wording()
+    return {"effects": magic.effects_info(w), "attributes": list(npc.ATTRIBUTES), "skills": list(npc.SKILLS),
+            "enchantTypes": list(magic.ENCHANT_TYPES), "spellTypes": list(magic.SPELL_TYPES)}
+
+
+def magic_record(oid):
+    """An enchantment's or spell's fields from the load order (to start a new one from); KeyError if none."""
+    with LOCK:
+        index = project.npcs()
+        for tag in ("ENCH", "SPEL"):
+            got = index._subs(tag, oid)
+            if got:
+                return magic.fields(tag, got[2])
+    raise KeyError(oid)
+
+
+def magic_new_id(base, taken=()):
+    """An enchantment or spell id no record or new one has: base, else base_01, base_02..."""
+    taken = {t.lower() for t in taken}
+    base = (base or "new_magic")[:magic.MAX_ID]
+    with LOCK:
+        index = project.npcs()
+        used = lambda oid: oid.lower() in taken or any(index.where(t).get(oid.lower()) for t in ("ENCH", "SPEL"))  # noqa: E731
+        if not used(base):
+            return {"id": base}
+        for n in range(1, 1000):
+            oid = "%s_%02d" % (base[:magic.MAX_ID - 3], n) if n < 100 else "%s_%d" % (base[:magic.MAX_ID - 4], n)
+            if not used(oid):
+                return {"id": oid}
+    raise ValueError("no free id like %s" % base)
+
+
 def item_new_id(base, taken=()):
     with LOCK:
         return {"id": project.items().free_id(base, taken)}
@@ -1111,7 +1151,8 @@ def clean_edits(edits):
                       if p and k not in gone},
             "containers": {k: v for k, v in sorted((edits.get("containers") or {}).items()) if v},
             "items": {k: v for k, v in sorted((edits.get("items") or {}).items()) if v},
-            "cells": {k: cells_.clean(v) for k, v in sorted((edits.get("cells") or {}).items()) if v}}
+            "cells": {k: cells_.clean(v) for k, v in sorted((edits.get("cells") or {}).items()) if v},
+            "magic": {k: v for k, v in sorted((edits.get("magic") or {}).items()) if v}}
 
 
 def _base_ids(edits):
@@ -1130,7 +1171,8 @@ def save(edits, label=""):
     clean = clean_edits(_base_ids(edits))
     path = project.file("edits")
     with LOCK:
-        if (clean["npcs"] or clean["dialogue"] or clean["containers"] or clean["items"]) and project.can_edit_npcs:
+        if (clean["npcs"] or clean["dialogue"] or clean["containers"] or clean["items"] or clean["magic"]) \
+                and project.can_edit_npcs:
             project.edits_override = clean
             try:
                 project.records_and_needs()
@@ -1533,6 +1575,18 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/item":
                 try:
                     return self.reply(json.dumps(item_info(body["id"], body.get("edits") or {})).encode())
+                except KeyError:
+                    return self.reply(b"{}", code=404)
+            if u.path == "/api/magic/info":
+                return self.reply(json.dumps(magic_info()).encode())
+            if u.path == "/api/magic/lines":
+                return self.reply(json.dumps(magic.lines(body.get("kind"), int(body.get("type") or 0),
+                                                         body.get("effects") or [], _wording())).encode())
+            if u.path == "/api/magic/new-id":
+                return self.reply(json.dumps(magic_new_id(body.get("base") or "", body.get("taken") or [])).encode())
+            if u.path == "/api/magic/get":
+                try:
+                    return self.reply(json.dumps(magic_record(body["id"])).encode())
                 except KeyError:
                     return self.reply(b"{}", code=404)
             if u.path == "/api/room-sets":

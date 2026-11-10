@@ -2,7 +2,7 @@
 import re
 import struct
 
-from .esp import cstr
+from .esp import cstr, zstr
 
 # Effect index -> GMST id (after "sEffect") and hardcoded flags (components/esm3/loadmgef.cpp, .hpp)
 EFFECTS = (
@@ -113,3 +113,106 @@ def enchantment(subs, wording):
     if kind in (1, 2) and not flags & 1:
         out["charge"] = charge
     return out
+
+
+# --- New enchantments and spells ---------------------------------------------------
+
+ENCHANT_TYPES = ("Cast once", "Cast when strikes", "Cast when used", "Constant effect")
+SPELL_TYPES = ("Spell", "Ability", "Blight", "Disease", "Curse", "Power")
+RANGE_FLAGS = (0x40, 0x80, 0x100)                   # CastSelf, CastTouch, CastTarget (loadmgef.hpp)
+MAX_EFFECTS = 8
+MAX_ID = 31
+EFFECT_FIELDS = ("effect", "skill", "attribute", "range", "area", "duration", "min", "max")
+
+
+def effects_info(wording):
+    """The effects to choose from: index, name and what they allow."""
+    out = []
+    for i, key in enumerate(EFFECTS):
+        f = FLAGS[i]
+        out.append({"index": i, "name": wording.word("sEffect" + key, re.sub(r"(?<=[a-z])(?=[A-Z0-9])", " ", key)),
+                    "skill": bool(f & TARGET_SKILL), "attribute": bool(f & TARGET_ATTRIBUTE),
+                    "duration": not f & NO_DURATION, "magnitude": not f & NO_MAGNITUDE,
+                    "ranges": [r for r, bit in enumerate(RANGE_FLAGS) if f & bit]})
+    return out
+
+
+def parse_effects(subs):
+    """A record's effects as fields."""
+    out = []
+    for s, v in subs:
+        if s == "ENAM" and len(v) >= 24:
+            out.append(dict(zip(EFFECT_FIELDS, struct.unpack("<hbbiiiii", v[:24]))))
+    return out
+
+
+def encode_effect(e):
+    i = int(e["effect"])
+    f = FLAGS[i]
+    return struct.pack("<hbbiiiii", i, int(e.get("skill", -1)) if f & TARGET_SKILL else -1,
+                       int(e.get("attribute", -1)) if f & TARGET_ATTRIBUTE else -1, int(e.get("range", 0)),
+                       max(0, int(e.get("area", 0))), max(0, int(e.get("duration", 0))),
+                       max(0, int(e.get("min", 0))), max(0, int(e.get("max", 0))))
+
+
+def lines(kind, type_, effects, wording):
+    """How the game words a new enchantment's or spell's effects."""
+    constant = (kind == "ENCH" and type_ == 3) or (kind == "SPEL" and type_ == 1)
+    out = []
+    for e in effects:
+        try:
+            out.append(wording.line(encode_effect(e), constant=constant))
+        except (KeyError, ValueError, IndexError, struct.error):
+            out.append("?")
+    return out
+
+
+def check(m, taken=()):
+    """Raise ValueError if a new enchantment or spell can't be written."""
+    kind, oid = m.get("kind"), m.get("id") or ""
+    what = "enchantment" if kind == "ENCH" else "spell"
+    if kind not in ("ENCH", "SPEL"):
+        raise ValueError("%s is neither an enchantment nor a spell." % oid)
+    if not oid or len(oid) > MAX_ID:
+        raise ValueError("A new %s's id must be 1-%d letters: %r" % (what, MAX_ID, oid))
+    effects = m.get("effects") or []
+    if not 1 <= len(effects) <= MAX_EFFECTS:
+        raise ValueError("The %s %s needs 1-%d effects." % (what, oid, MAX_EFFECTS))
+    for e in effects:
+        i = int(e.get("effect", -1))
+        if not 0 <= i < len(EFFECTS):
+            raise ValueError("The %s %s has an effect the game doesn't know." % (what, oid))
+        constant = (kind == "ENCH" and m.get("type") == 3) or (kind == "SPEL" and m.get("type") == 1)
+        if not constant and not FLAGS[i] & RANGE_FLAGS[int(e.get("range", 0))]:
+            raise ValueError("In %s, %s can't be cast on that range." % (oid, EFFECTS[i]))
+        if int(e.get("min", 0)) > int(e.get("max", 0)):
+            raise ValueError("In %s, an effect's least magnitude is more than its most." % oid)
+    types = ENCHANT_TYPES if kind == "ENCH" else SPELL_TYPES
+    if not 0 <= int(m.get("type", 0)) < len(types):
+        raise ValueError("The %s %s has no type." % (what, oid))
+
+
+def encode(m):
+    """A new enchantment's or spell's subrecords."""
+    fx = [("ENAM", encode_effect(e)) for e in m["effects"]]
+    auto = 1 if m.get("auto", True) else 0
+    if m["kind"] == "ENCH":
+        return [("NAME", zstr(m["id"])), ("ENDT", struct.pack("<iiii", int(m.get("type", 0)), int(m.get("cost", 0)),
+                                                                  int(m.get("charge", 0)), auto))] + fx
+    flags = auto | (4 if m.get("always") else 0)
+    out = [("NAME", zstr(m["id"]))]
+    if m.get("name"):
+        out.append(("FNAM", zstr(m["name"])))
+    return out + [("SPDT", struct.pack("<iii", int(m.get("type", 0)), int(m.get("cost", 0)), flags))] + fx
+
+
+def fields(tag, subs):
+    """An enchantment's or spell's fields, to start a new one from."""
+    d = dict(subs)
+    if tag == "ENCH":
+        t, cost, charge, flags = struct.unpack("<iiii", d.get("ENDT", b"")[:16].ljust(16, b"\0"))
+        return {"kind": "ENCH", "id": cstr(d.get("NAME", b"")), "type": t, "cost": cost, "charge": charge,
+                "auto": bool(flags & 1), "effects": parse_effects(subs)}
+    t, cost, flags = struct.unpack("<iii", d.get("SPDT", b"")[:12].ljust(12, b"\0"))
+    return {"kind": "SPEL", "id": cstr(d.get("NAME", b"")), "name": cstr(d.get("FNAM", b"")), "type": t, "cost": cost,
+            "auto": bool(flags & 1), "always": bool(flags & 4), "effects": parse_effects(subs)}

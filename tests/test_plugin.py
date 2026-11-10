@@ -952,7 +952,8 @@ class Live(unittest.TestCase):
              "npcs": {"fargoth": {"level": 5}}, "dialogue": {"ring|123": {"text": "Hello"}},
              "props": {"c|a|1": {"owner": "fargoth"}}, "containers": {"chest_a": {"respawn": True}},
              "items": {"my_sword": {"new": True, "kind": "WEAP", "id": "my_sword"}},
-             "cells": {"a room": {"new": True, "name": "A Room"}}}
+             "cells": {"a room": {"new": True, "name": "A Room"}},
+             "magic": {"x_fire_en": {"new": True, "kind": "ENCH", "id": "x_fire_en"}}}
         self.assertEqual(live.edits_of(live.entries(e)), e)
         self.assertIn("props|c|a|1", live.entries(e))
         self.assertIn("npcs|fargoth", live.entries(e))

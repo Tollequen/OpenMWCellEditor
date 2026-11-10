@@ -127,7 +127,7 @@ def encode_refs(refs, refnums):
 
 def empty_edits():
     return {"moved": {}, "deleted": [], "replaced": {}, "added": [], "attached": {}, "doors": {}, "groups": {},
-            "npcs": {}, "dialogue": {}, "props": {}, "containers": {}, "items": {}, "cells": {}}
+            "npcs": {}, "dialogue": {}, "props": {}, "containers": {}, "items": {}, "cells": {}, "magic": {}}
 
 
 def dest_of(subs):

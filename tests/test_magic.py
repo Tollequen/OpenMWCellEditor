@@ -38,3 +38,32 @@ class EffectLines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NewMagic(unittest.TestCase):
+    def setUp(self):
+        self.w = magic.Wording(lambda name: None, ATTRIBUTES, SKILLS)
+
+    def test_round_trip(self):
+        m = {"kind": "SPEL", "id": "x_spark", "name": "Spark", "type": 0, "cost": 5, "auto": False, "always": True,
+             "effects": [{"effect": 15, "skill": -1, "attribute": -1, "range": 2, "area": 5, "duration": 1, "min": 2, "max": 9}]}
+        magic.check(m)
+        got = magic.fields("SPEL", magic.encode(m))
+        self.assertEqual(got, dict(m, kind="SPEL"))
+        self.assertEqual(magic.lines("SPEL", 0, m["effects"], self.w), ["Shock Damage 2 to 9 pts for 1 sec in 5 ft on Target"])
+
+    def test_constant_enchantment(self):
+        m = {"kind": "ENCH", "id": "x_en", "type": 3, "auto": True,
+             "effects": [{"effect": 83, "skill": 5, "attribute": -1, "range": 0, "min": 5, "max": 5}]}
+        magic.check(m)
+        self.assertEqual(magic.lines("ENCH", 3, m["effects"], self.w), ["Fortify Long Blade 5 pts"])
+        self.assertEqual(magic.fields("ENCH", magic.encode(m))["effects"][0]["skill"], 5)
+
+    def test_refused(self):
+        good = {"kind": "SPEL", "id": "x", "type": 0, "effects": [{"effect": 14, "range": 2, "min": 1, "max": 2}]}
+        for bad in ({"id": ""}, {"effects": []}, {"effects": [{"effect": 999}]},
+                    {"effects": [{"effect": 14, "range": 2, "min": 5, "max": 2}]},
+                    {"effects": [{"effect": 60, "range": 2}]}, {"kind": "X"}):
+            with self.assertRaises(ValueError, msg=bad):
+                magic.check(dict(good, **bad))
+        magic.check(good)

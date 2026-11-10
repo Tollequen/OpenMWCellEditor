@@ -778,6 +778,14 @@ function build() {
   sp.appendChild(addRow('npc-spells', 'Spell ID (e.g. fire_bite)', false, (id) => {
     setFields({ spells: [...fields().spells, id] });
   }, pickSpell));
+  if (api.magic) {
+    const make = sp.appendChild(el('button', null, 'New spell…'));
+    make.title = 'Make a new spell in your plugin and give it to this NPC';
+    make.addEventListener('click', async () => {
+      const id = await api.magic.create({ kind: 'SPEL' });
+      if (id) setFields({ spells: [...fields().spells, id] });
+    });
+  }
 
   c.items.dataset.empty = 'No items in inventory.';
   c.spells.dataset.empty = 'No spells assigned.';
@@ -794,7 +802,8 @@ function build() {
 
 // what the pickers of the item and spell fields choose from
 const pickItem = (cur) => choose({ title: 'Choose an item', items: allItems(), current: cur });
-const pickSpell = (cur) => choose({ title: 'Choose a spell', items: lists.spells, current: cur });
+const allSpells = () => [...(api.magic?.newSpells() || []), ...lists.spells];
+const pickSpell = (cur) => choose({ title: 'Choose a spell', items: allSpells(), current: cur });
 
 function addRow(listId, placeholder, withCount, onAdd, pick) {
   const row = el('div', 'npc-add');
@@ -1020,7 +1029,7 @@ function fillSpells(f) {
   }, (row, id) => {
     const [i, , what, rm] = row.children;
     if (document.activeElement !== i) i.value = id;
-    const o = byId(lists.spells, id);
+    const o = byId(allSpells(), id);
     what.textContent = o ? `${o.name || o.id} · ${o.type}` : 'not in the load order';
     what.classList.toggle('bad', !o);
     i.disabled = rm.disabled = !on;

@@ -36,6 +36,8 @@ def states(e):
         out["items|" + k] = {"item": v}
     for k, v in e.get("cells", {}).items():
         out["cells|" + k] = {"cell": v}
+    for k, v in e.get("magic", {}).items():
+        out["magic|" + k] = {"magic": v}
     return out
 
 
@@ -53,6 +55,9 @@ def _label(key, state=None):
     if key.startswith("items|"):
         c = (state or {}).get("item") or {}
         return "Items", c.get("id") or key[len("items|"):]
+    if key.startswith("magic|"):
+        m = (state or {}).get("magic") or {}
+        return "Enchantments" if m.get("kind") == "ENCH" else "Spells", m.get("id") or key[len("magic|"):]
     if key.startswith("cells|"):
         c = (state or {}).get("cell") or {}
         return c.get("name") or key[len("cells|"):], "the cell"
