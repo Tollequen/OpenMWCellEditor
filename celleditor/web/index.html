@@ -740,6 +740,30 @@
     .dlg-more-b .npc-f { grid-template-columns: 110px minmax(0, 1fr); }
   }
   body.touch #npc-box input, body.touch #npc-box select { font-size: 16px; }
+  /* Records (records.js) */
+  .dialog.records-dialog { width: min(760px, 100%); display: flex; flex-direction: column; }
+  .rc-head { display: flex; align-items: center; }
+  .rc-head h3 { margin: 0; }
+  .rc-head .spacer, .records-dialog .bar .spacer { flex: 1; }
+  .rc-sub { margin: 4px 0 10px !important; }
+  .rc-tabs { margin-bottom: 8px; flex: none; }
+  .rc-list { height: min(440px, 52vh); overflow-y: auto; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--field); }
+  .rc-row { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
+  .rc-text { flex: 1; min-width: 0; }
+  .rc-name { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .rc-name .dim { font-size: 12px; }
+  .rc-tag { font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 9px; color: var(--dim); }
+  .rc-tag.new { color: var(--good); border-color: rgba(125, 187, 125, .4); }
+  .rc-use { color: var(--dim); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+  .rc-use:empty { display: none; }
+  .rc-use.unused { color: var(--warn); }
+  .rc-acts { display: flex; gap: 6px; flex: none; }
+  .rc-empty { padding: 14px 12px; }
+  .records-dialog .bar { align-items: center; }
+  .records-dialog .rc-note { margin: 0; }
+  body.layout-new #n-project-list #records .lab { display: flex; flex-direction: column; text-align: left; min-width: 0; white-space: normal; line-height: 1.25; }
+  body.layout-new #n-project-list #records .lab small { color: var(--dim); font-size: 11.5px; }
+  body.layout-new #n-project-list #records { height: auto; padding: 6px 10px; gap: 10px; }
 </style>
 <link rel="stylesheet" href="studio.css">
 <script type="importmap">
@@ -896,6 +920,7 @@
     </div>
     <div class="pair one desktop-only"><button id="paint-rooms" title="Build rooms from room pieces and saved room sets: click on the grid to place them"><i data-icon="grid"></i>Room builder…</button></div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
+    <div class="pair one"><button id="records" title="Everything this project made or changed: items, NPCs, enchantments, spells, containers, cells and dialogue. New ones are made here too"><i data-icon="list"></i>Records…</button></div>
   </div>
   <div class="psec n-only" id="n-view"><h3>View</h3><div id="n-view-list"></div></div>
   <div class="psec n-only" id="n-project"><h3>Project</h3><div id="n-project-list"></div></div>

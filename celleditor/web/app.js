@@ -14,6 +14,7 @@ import { setupCells } from './cells.js';
 import { setupMagic } from './magic.js';
 import { setupChoose, choose, withChooser } from './choose.js';
 import { setupGamepad } from './gamepad.js';
+import { setupRecords } from './records.js';
 
 const $ = (id) => document.getElementById(id);
 fillIcons();
@@ -3445,7 +3446,6 @@ function openMenuAt(x, y, own = null, before = []) {
     if (target) m.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
     item('Add object here…', () => addAt(hit));
     item('Add NPC here…', () => addAt(hit, 'npc'));
-    if (!TOUCH) item('Room builder here…', () => openPainter(hit.point.z));
   }
   showAddMarker(hit);
   m.classList.add('open');
@@ -4692,6 +4692,28 @@ $('edit-npc').addEventListener('click', () => { const r = state.selected?.userDa
 $('tb-npc').addEventListener('click', () => { const r = state.selected?.userData.ref; if (r) openNpcs(r.src); });
 $('reset').addEventListener('click', resetSelected);
 
+// --- Records ---------------------------------------------------------------------------
+
+const recordsWin = setupRecords({
+  state,
+  npcName: (id) => { try { return npcEditor.nameOf(id); } catch (err) { return id; } },
+  editNpc: openNpcs,
+  newNpc: () => $('add-npc').click(),
+  editItem: (id) => itemsWin.edit({ src: id, editable: true }),
+  newItem: () => itemsWin.create(() => {}),
+  newMagic: (kind) => magicWin.create({ kind }),
+  refreshMagic: () => magicWin.refresh(),
+  magicLines: (id) => {
+    const m = [...magicWin.newEnchants(), ...magicWin.newSpells()].find((x) => x.id === id);
+    return m ? m.effects || (m.note ? [m.note] : []) : [];
+  },
+  newCell: () => cellsWin.create(),
+  editCell: (name) => cellsWin.edit(name),
+  goCell: (name) => loadCell(name),
+  goTo: (key, cell) => projectApi.goTo(key, cell),
+});
+$('records').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); closeMenu(); recordsWin.open(); });
+
 // --- Project panel ---------------------------------------------------------------------
 
 const projectPanel = { mod: null, mounted: false, opening: null };
@@ -4896,7 +4918,7 @@ async function save() {
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
   ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['paint-rooms', 'n-add'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
-  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['history', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['history', 'n-project-list'], ['records', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
 const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
@@ -5089,7 +5111,8 @@ function richPanel() {
   if (!STUDIO && !TOUCH) return;
   for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
     ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item…', 'Your own weapon, armour, book…'],
-    ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid']]) {
+    ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid'],
+    ['records', 'Records…', 'The items, NPCs, magic and cells you made']]) {
     const b = $(id);
     for (const n of [...b.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
     const lab = document.createElement('span'), small = document.createElement('small');
