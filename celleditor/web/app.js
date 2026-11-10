@@ -5076,11 +5076,31 @@ function setupFloating() {
     saveFloating();
   });
 }
+richPanel();
 if (STUDIO) setupStudio(); else setupFloating();
+if (!STUDIO) $('hints-row').style.display = 'none';
 
 // --- Studio layout -----------------------------------------------------------------
 // Desktop: the panel's controls moved into a toolbar (project, cell, undo, gizmo, snapping, save), a rail (adding,
 // view, project), an inspector that shows with a selection, and a line of what the mouse and keys do now.
+
+// The Add buttons say what they're for, and a selection's own actions come before its fields.
+function richPanel() {
+  if (!STUDIO && !TOUCH) return;
+  for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
+    ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item…', 'Your own weapon, armour, book…'],
+    ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid']]) {
+    const b = $(id);
+    for (const n of [...b.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
+    const lab = document.createElement('span'), small = document.createElement('small');
+    lab.className = 'lab';
+    small.textContent = what;
+    lab.append(name, small);
+    b.append(lab);
+  }
+  $('sel-edit').before($('own-row'), $('door-row'));
+  if (TOUCH) $('n-add').before($('sec-selected'));
+}
 
 function setupStudio() {
   const body = document.body;
@@ -5134,28 +5154,29 @@ function setupStudio() {
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePops(); });
   $('guide-btn').addEventListener('click', closePops);
 
-  for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
-    ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item…', 'Your own weapon, armour, book…'],
-    ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid']]) {
-    const b = $(id);
-    for (const n of [...b.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
-    const lab = make('span', '', 'lab');
-    const small = make('small');
-    small.textContent = what;
-    lab.append(name, small);
-    b.append(lab);
-  }
-
+  $('n-add').querySelector('h3').append($('hide-panel'));
+  $('hide-panel').title = 'Hide this panel (P)';
   const insp = make('div', 'inspector');
   insp.append($('sec-selected'));
   body.append(insp);
-  $('sel-edit').before($('own-row'), $('door-row'));
   const close = tool('insp-close', 'x', 'Deselect (Esc)');
   close.classList.add('ghost');
   close.addEventListener('click', () => select(null));
   $('obj-history').after(close);
 
-  body.append(make('div', 'hintbar'));
+  const bar = make('div', 'hintbar');
+  const hide = tool('', 'x', 'Hide the key hints (Settings brings them back)');
+  hide.classList.add('ghost');
+  bar.append(make('span', '', 'rest'), hide);
+  body.append(bar);
+  const setHints = (on) => {
+    body.classList.toggle('hints', on);
+    $('hints').checked = on;
+    try { localStorage.setItem('ce-hints', on ? '1' : '0'); } catch (err) { /* private mode */ }
+  };
+  setHints(stored('ce-hints') !== '0');
+  hide.addEventListener('click', () => setHints(false));
+  $('hints').addEventListener('change', () => setHints($('hints').checked));
   new MutationObserver(updateHints).observe(body, { attributes: true, attributeFilter: ['class'] });
   for (const id of ['place-banner', 'dest-banner']) {
     new MutationObserver(updateHints).observe($(id), { attributes: true, attributeFilter: ['class'] });
@@ -5165,7 +5186,7 @@ function setupStudio() {
 }
 
 function updateHints() {
-  const bar = $('hintbar');
+  const bar = $('hintbar')?.querySelector('.rest');
   if (!bar) return;
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
   const n = state.selection.length;
