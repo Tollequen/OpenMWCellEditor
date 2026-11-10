@@ -773,7 +773,7 @@ const ownedFill = new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: tr
 const ownedCube = new THREE.BoxGeometry(1, 1, 1);
 
 function updateOwnedBoxes() {
-  for (const b of ownedBoxes.children) { if (b.isBox3Helper) { b.geometry.dispose(); b.material.dispose(); } }
+  for (const b of ownedBoxes.children) { if (b.isLineSegments) { b.geometry.dispose(); b.material.dispose(); } }
   ownedBoxes.clear();
   if (!owned.on) return;
   for (const obj of world.children) {
@@ -795,7 +795,7 @@ $('owned-btn').addEventListener('click', () => {
   $('owned-btn').classList.toggle('on', owned.on);
   $('owned-btn').setAttribute('aria-pressed', String(owned.on));
   updateOwnedBoxes();
-  const n = ownedBoxes.children.filter((b) => b.isBox3Helper).length;
+  const n = ownedBoxes.children.filter((b) => b.isLineSegments).length;
   status(owned.on ? (n ? `${n} owned object${n > 1 ? 's' : ''} in red.` : 'Nothing here is owned.') : '');
 });
 
