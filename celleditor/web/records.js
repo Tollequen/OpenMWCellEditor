@@ -85,8 +85,9 @@ function tabs() {
   const magic = (kind, what, types) => rows('magic', (k, v) => {
     if (v.kind !== kind) return null;
     const u = useOf(low(v.id), what);
-    return { name: v.name || v.id, id: v.id, tag: 'New', kind: types[v.type] || '', use: u.text, unused: u.unused, at: [],
-             del: remover('magic', k, v.name || v.id, true, u.text),
+    return { name: v.name || v.id, id: v.id, tag: v.new ? 'New' : 'Modified', kind: types[v.type] || '', use: u.text,
+             unused: !!v.new && u.unused, at: [], edit: () => api.editMagic(v.id),
+             del: remover('magic', k, v.name || v.id, !!v.new, u.text),
              note: (api.magicLines(v.id) || []).join(', ') };
   });
   return [

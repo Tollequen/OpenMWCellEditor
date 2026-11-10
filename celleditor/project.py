@@ -218,21 +218,26 @@ class Project:
         return self.items().records(edits)
 
     def magic_records(self):
-        """The new enchantments' and spells' records; raises ValueError."""
-        out = []
+        """The new and changed enchantments' and spells' records, and the files they need; raises ValueError."""
+        out, need = [], {}
         index = self.npcs()
         for key, m in sorted((self.load_edits().get("magic") or {}).items()):
-            if not m.get("new"):
-                continue
             magic.check(m)
+            what = "enchantment" if m["kind"] == "ENCH" else "spell"
             if m["id"].lower() != key:
-                raise ValueError("The new %s is stored under another id." % m["id"])
+                raise ValueError("The %s %s is stored under another id." % (what, m["id"]))
             w = index.where(m["kind"]).get(key)
-            if w:
-                raise ValueError("The new %s has the id of %s in %s: give it another id." % (
-                    m["id"], "an enchantment" if m["kind"] == "ENCH" else "a spell", w[0].name))
+            if m.get("new") and w:
+                raise ValueError("The new %s has the id of an %s in %s: give it another id." % (m["id"], what, w[0].name))
+            if not m.get("new"):
+                if not w:
+                    raise ValueError("The %s %s isn't in the load order any more: its changes can't be saved."
+                                     % (what, m["id"]))
+                if not index._ok(w[0].name):
+                    raise ValueError("The %s %s comes from %s, which this plugin can't use." % (what, m["id"], w[0].name))
+                need.setdefault(w[0].name, []).append("%s changed" % m["id"])
             out.append(((m["kind"], key), esp.record(m["kind"], [esp.sub(s, v) for s, v in magic.encode(m)])))
-        return out
+        return out, need
 
     def records_and_needs(self):
         """The plugin's object records [((tag, id), record)] (NPCs, containers), dialogue groups, and the files
@@ -241,12 +246,13 @@ class Project:
         conts, more_c = self.container_records()
         things, more_i = self.item_records()
         groups, more = self.dialogue_records()
+        spells, more_m = self.magic_records()
         need = {k: list(v) for k, v in need.items()}
-        for extra in (more_c, more_i, more):
+        for extra in (more_c, more_i, more_m, more):
             for k, v in extra.items():
                 need.setdefault(k, []).extend(v)
         return ([(("NPC_", k), rec) for k, rec in npcs] + [(("CONT", k), rec) for k, rec in conts] + things
-                + self.magic_records(),
+                + spells,
                 groups, need)
 
     def _records_load(self):

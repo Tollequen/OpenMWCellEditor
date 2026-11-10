@@ -767,6 +767,47 @@ def item_info(oid, edits=None):
     return dict(it, own=own, canEdit=project.can_edit_npcs and it["editable"], canCopy=project.can_edit_npcs)
 
 
+def openmw_program():
+    """The OpenMW program on this computer (or the settings' "openmw_program"), or None."""
+    import glob
+    chosen = SETTINGS.get("openmw_program") if SETTINGS else None
+    if chosen:
+        return chosen if os.path.exists(chosen) else None
+    if sys.platform == "darwin":
+        found = ["/Applications/OpenMW.app/Contents/MacOS/openmw",
+                 os.path.expanduser("~/Applications/OpenMW.app/Contents/MacOS/openmw")]
+    elif sys.platform == "win32":
+        tops = [os.environ.get(k) for k in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432")]
+        found = sorted((p for t in tops if t for p in glob.glob(os.path.join(t, "OpenMW*", "openmw.exe"))), reverse=True)
+    else:
+        found = [shutil.which("openmw") or "", "/usr/games/openmw"]
+    return next((p for p in found if p and os.path.exists(p)), None)
+
+
+def play(cell):
+    """Start OpenMW in a cell, past the menu, with the project's plugin loaded; ValueError says why it can't."""
+    import subprocess
+    program = openmw_program()
+    if not program:
+        raise ValueError("OpenMW wasn't found on this computer. Start it yourself and load the plugin there.")
+    if not os.path.exists(project.plugin):
+        raise ValueError("Save first: the plugin isn't written yet.")
+    grid = esp.parse_exterior(cell)
+    args = [program, "--skip-menu", "--start", "%d, %d" % tuple(grid) if grid else cell]
+    path = openmw_cfg()
+    cfg = read_cfg(path) if path else {}
+    plugin, folder = os.path.basename(project.plugin), os.path.dirname(os.path.abspath(project.plugin))
+    same = lambda a, b: os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))   # noqa: E731
+    added = plugin.lower() not in {c.lower() for c in cfg.get("content", [])}
+    if added:
+        args += ["--content", plugin]
+        if not any(same(d, folder) for d in cfg.get("data", [])):
+            args += ["--data", folder]
+    subprocess.Popen(args, cwd=os.path.dirname(program), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return {"ok": True, "cell": cell, "plugin": plugin, "added": added}
+
+
 def cell_settings(name, taken=()):
     """For the New cell window: an interior's settings (to start from), and why the name can't be a new cell's."""
     with LOCK:
@@ -1555,6 +1596,14 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.reply(json.dumps({"ok": False, "message": str(e)}).encode(), code=400)
                 except PermissionError as e:
                     return self.reply(json.dumps({"ok": False, "message": permission_message(e)}).encode(), code=403)
+            if u.path == "/api/play":
+                if not self.here():
+                    return self.reply(json.dumps({"ok": False, "message": "The game starts on the computer the "
+                                                  "editor runs on: use that one."}).encode(), code=403)
+                try:
+                    return self.reply(json.dumps(play(body.get("cell") or "")).encode())
+                except (ValueError, OSError) as e:
+                    return self.reply(json.dumps({"ok": False, "message": str(e)}).encode(), code=400)
             if u.path == "/api/revert":
                 try:
                     return self.reply(json.dumps(revert(body["name"], body.get("key"))).encode())

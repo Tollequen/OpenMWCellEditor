@@ -8,7 +8,7 @@ const lineCache = new Map();          // id (lower case): effect lines of a new 
 
 export function setupMagic(a) {
   api = a;
-  return { create, newEnchants, newSpells, refresh };
+  return { create, edit, newEnchants, newSpells, refresh };
 }
 
 const el = (tag, cls, text) => {
@@ -59,17 +59,34 @@ async function refresh() {
 const constant = (f) => (f.kind === 'ENCH' && f.type === 3) || (f.kind === 'SPEL' && f.type === 1);
 
 // kind: 'ENCH' or 'SPEL'; type: the enchantment's type to start with; resolves to the new id, or null
-async function create({ kind, type = 0, name = '' }) {
+function create(args) { return open(args, null); }
+
+// Change one: the project's own, or the game's (for everything that uses it); resolves to its id, or null
+async function edit(id) {
+  let old = api.state.edits.magic?.[id.toLowerCase()];
+  if (!old) {
+    try { old = await post('/api/magic/get', { id }); } catch (err) { api.status(`${id} couldn't be read.`, true); return null; }
+  }
+  return open({ kind: old.kind, type: old.type, name: old.name || '' }, old);
+}
+
+async function open({ kind, type = 0, name = '' }, old) {
   let fx, all;
   try { [fx, all] = await Promise.all([loadInfo(), loadLists()]); } catch (err) { api.status('The magic effects didn\'t load.', true); return null; }
   const what = kind === 'ENCH' ? 'enchantment' : 'spell';
   const f = { kind, id: '', name, type, cost: 0, charge: 100, auto: true, always: false, effects: [] };
+  if (old) {
+    Object.assign(f, { id: old.id, cost: old.cost, charge: old.charge ?? 100, auto: !!old.auto, always: !!old.always,
+                       effects: old.effects.map((e) => ({ ...e })) });
+  }
   return new Promise((resolve) => {
     const bg = el('div', 'dialog-bg');
-    bg.innerHTML = `<div class="dialog magic-dialog"><h3>New ${what}</h3><p class="dim">In your plugin. Start from an existing one or add effects.</p>
+    bg.innerHTML = `<div class="dialog magic-dialog"><h3>${old ? (old.name || old.id) : `New ${what}`}</h3><p class="dim">${old
+      ? old.new ? `${old.id} · a new ${what} of this project.` : `${old.id} · one of the game's: the change applies to everything that uses it.`
+      : 'In your plugin. Start from an existing one or add effects.'}</p>
       <div class="mg-form"></div><div class="mg-effects"></div>
       <div class="mg-preview"></div><div class="npc-hint mg-note"></div>
-      <div class="bar"><span class="spacer"></span><button class="mg-cancel">Cancel</button><button class="primary mg-done">Create</button></div></div>`;
+      <div class="bar"><span class="spacer"></span><button class="mg-cancel">Cancel</button><button class="primary mg-done">${old ? 'Done' : 'Create'}</button></div></div>`;
     document.body.appendChild(bg);
     const q = (c) => bg.querySelector(c);
     const done = (v) => { bg.remove(); resolve(v); };
@@ -111,7 +128,7 @@ async function create({ kind, type = 0, name = '' }) {
       t.readOnly = true;
       t.value = f.template || '';
       t.placeholder = 'None';
-      const tl = box.appendChild(el('label', 'opt'));
+      const tl = (old ? el('div') : box).appendChild(el('label', 'opt'));
       tl.appendChild(el('span', null, 'Use template'));
       tl.appendChild(withChooser(t, (cur) => choose({
         title: `Choose ${kind === 'ENCH' ? 'an enchantment' : 'a spell'} to start from`, current: cur, none: 'No template',
@@ -124,9 +141,9 @@ async function create({ kind, type = 0, name = '' }) {
         n.maxLength = 31;
         n.value = f.name;
         n.placeholder = 'As the game shows it, e.g. Spark';
-        n.addEventListener('input', () => { f.name = n.value; if (!f.idTouched) { f.id = idFrom(f.name); idBox.value = f.id; } });
+        n.addEventListener('input', () => { f.name = n.value; if (!old && !f.idTouched) { f.id = idFrom(f.name); idBox.value = f.id; } });
       }
-      const idBox = row('ID', el('input'));
+      const idBox = row('ID', el('input'), old ? el('div') : undefined);
       idBox.type = 'text';
       idBox.maxLength = 31;
       idBox.value = f.id;
@@ -245,12 +262,12 @@ async function create({ kind, type = 0, name = '' }) {
       if (!f.effects.length) { note('Add an effect first.'); return; }
       if (f.effects.some((e) => e.min > e.max)) { note('A least magnitude is more than its most.'); return; }
       if (kind === 'SPEL' && !f.name.trim()) { note('Give the spell a name.'); return; }
-      let id;
-      try {
+      let id = old?.id;
+      if (!old) try {
         id = (await post('/api/magic/new-id', { base: f.id || idFrom(f.name) || (kind === 'ENCH' ? 'new_en' : 'new_spell'),
                                                 taken: Object.values(api.state.edits.magic || {}).map((m) => m.id) })).id;
       } catch (err) { note('The editor didn\'t answer.'); return; }
-      const m = { new: true, kind, id, type: f.type, cost: f.cost, charge: f.charge, auto: f.auto,
+      const m = { ...(old && !old.new ? {} : { new: true }), kind, id, type: f.type, cost: f.cost, charge: f.charge, auto: f.auto,
                   effects: f.effects.map((e) => ({ ...e })), ...(kind === 'SPEL' ? { name: f.name.trim(), always: f.always } : {}) };
       done(id);
       const before = api.entriesOf(api.state.edits);
@@ -260,7 +277,7 @@ async function create({ kind, type = 0, name = '' }) {
       if (diff.length) api.state.undo.push({ diff });
       api.changed();
       try { lineCache.set(id.toLowerCase(), await post('/api/magic/lines', { kind, type: m.type, effects: m.effects })); } catch (err) { /* later */ }
-      api.status(`Made the ${what} ${id}.`);
+      api.status(old ? `Changed the ${what} ${id}.` : `Made the ${what} ${id}.`);
     });
   });
 }

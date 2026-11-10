@@ -436,6 +436,14 @@ function open(info, r, place = null) {
           setTimeout(showEffects, 300);
         });
         box.closest('.pick-wrap').appendChild(make);
+        const change = el('button', null, 'Edit…');
+        change.title = 'Change this enchantment\'s effects';
+        change.addEventListener('click', async (e) => {
+          e.preventDefault();
+          if (!f.enchant) { about.textContent = 'Choose an enchantment first.'; return; }
+          if (await api.magic().edit(f.enchant)) setTimeout(showEffects, 300);
+        });
+        box.closest('.pick-wrap').appendChild(change);
       }
       form.appendChild(about);
       showEffects();

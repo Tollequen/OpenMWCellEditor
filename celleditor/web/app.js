@@ -4726,6 +4726,7 @@ const recordsWin = setupRecords({
   editItem: (id) => itemsWin.edit({ src: id, editable: true }),
   newItem: () => itemsWin.create(() => {}),
   newMagic: (kind) => magicWin.create({ kind }),
+  editMagic: (id) => magicWin.edit(id),
   refreshMagic: () => magicWin.refresh(),
   magicLines: (id) => {
     const m = [...magicWin.newEnchants(), ...magicWin.newSpells()].find((x) => x.id === id);
@@ -4735,6 +4736,22 @@ const recordsWin = setupRecords({
   editCell: (name) => cellsWin.edit(name),
   goCell: (name) => loadCell(name),
   goTo: (key, cell) => projectApi.goTo(key, cell),
+});
+// Test in game: the saved plugin, in OpenMW, in this cell
+$('play').addEventListener('click', async () => {
+  if (!state.cell) return;
+  if (state.dirty && !await save()) return;
+  $('play').disabled = true;
+  try {
+    const res = await fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                           body: JSON.stringify({ cell: state.cell.name }) });
+    const out = await res.json();
+    status(out.ok ? `Starting OpenMW in ${state.cell.name}${out.added ? `, with ${out.plugin} loaded for this run` : ''}. It takes a moment.`
+      : out.message, !out.ok);
+  } catch (err) {
+    status('The editor didn\'t answer.', true);
+  }
+  setTimeout(() => { $('play').disabled = false; }, 4000);
 });
 $('records').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); closeMenu(); recordsWin.open(); });
 
@@ -4942,7 +4959,7 @@ async function save() {
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
   ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['paint-rooms', 'n-add'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
-  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['history', 'n-project-list'], ['records', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['play', 'n-project-list'], ['history', 'n-project-list'], ['records', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
 const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
@@ -5172,7 +5189,7 @@ function setupStudio() {
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
   top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'),
-             make('span', '', 'spacer'), $('mouselook'), sep(),
+             make('span', '', 'spacer'), $('play'), $('mouselook'), sep(),
              group(settings, $('fullscreen'), $('hide-panel')), sep(), group($('undo'), $('redo')), $('save'));
   body.append(top);
 
