@@ -318,6 +318,10 @@
                max-width: 340px; max-height: calc(100% - 24px); overflow: hidden; box-sizing: border-box;
                font-size: 12px; pointer-events: none; }
   #look-keys.open { display: block; }
+  #rb-float { position: fixed; right: 12px; top: 12px; z-index: 6; display: none; background: var(--float);
+              border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow);
+              font-size: 12px; max-width: 330px; pointer-events: none; }
+  body.building #rb-float { display: block; }
   body.mouse-look #show-panel, body.mouse-look #mouselook { display: none; }
   #mouselook { position: fixed; top: 10px; right: 12px; z-index: 3; background: var(--float); gap: 7px; }
   /* Actions of the selected NPC or door over the view */
@@ -366,12 +370,12 @@
   body.docked:not(.touch):not(.panel-hidden) #quick-acts { left: calc(50% + var(--pw) / 2); }
   body.mouse-look #quick-acts, body:has(.banner.open, #dest-banner.open) #quick-acts { display: none; }
   #mouselook kbd { font-size: 11px; padding: 1px 4px; }
-  #look-keys .lk-title { font-weight: 600; margin-bottom: 6px; display: flex; gap: 8px; align-items: baseline; }
-  #look-keys .lk-title span { font-weight: 400; color: var(--dim); }
-  #look-keys dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; align-items: center; }
-  #look-keys dt { display: flex; gap: 2px; white-space: nowrap; color: var(--dim); }
-  #look-keys dd { margin: 0; color: var(--dim); }
-  #look-keys kbd { font-size: 11px; padding: 1px 4px; }
+  #look-keys .lk-title, #rb-float .lk-title { font-weight: 600; margin-bottom: 6px; display: flex; gap: 8px; align-items: baseline; }
+  #look-keys .lk-title span, #rb-float .lk-title span { font-weight: 400; color: var(--dim); }
+  #look-keys dl, #rb-float dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; align-items: center; }
+  #look-keys dt, #rb-float dt { display: flex; gap: 2px; white-space: nowrap; color: var(--dim); }
+  #look-keys dd, #rb-float dd { margin: 0; color: var(--dim); }
+  #look-keys kbd, #rb-float kbd { font-size: 11px; padding: 1px 4px; }
 
   /* Quick guide */
   .guide { width: min(460px, 100%); }
@@ -742,6 +746,19 @@
   <span id="qa-snaps"><button id="qa-grid" class="qa-toggle" aria-pressed="false"><i data-icon="grid"></i>Snap to grid</button><button id="qa-steps" class="qa-toggle" aria-pressed="false"><i data-icon="steps"></i>Snap to steps</button></span>
 </div>
 <button id="mouselook" class="desktop-only" title="Fly mode: look around with the mouse (Tab)"><i data-icon="crosshair"></i>Fly mode <kbd>Tab</kbd></button>
+<div id="rb-float" aria-label="Room builder keys">
+  <div class="lk-title">Room builder <span><kbd>Esc</kbd> when done</span></div>
+  <dl>
+    <dt>Click, drag</dt><dd>Place the piece or set</dd>
+    <dt><kbd class="alt">Alt</kbd>+click</dt><dd>Take away a piece you added (drag for more)</dd>
+    <dt><kbd>Z</kbd><kbd>X</kbd></dt><dd>Turn by a quarter</dd>
+    <dt><kbd>PgUp</kbd><kbd>PgDn</kbd></dt><dd>Raise, lower by 64</dd>
+    <dt>Wheel, <kbd>[</kbd><kbd>]</kbd></dt><dd>Next piece; <kbd>Shift</kbd>+wheel moves</dd>
+    <dt>Right drag</dt><dd>Look around</dd>
+    <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move; <kbd>Q</kbd> down, <kbd>E</kbd> up</dd>
+    <dt><kbd class="mod">Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo</dd>
+  </dl>
+</div>
 <div id="look-keys" aria-label="Keys">
   <div class="lk-title">Fly mode <span><kbd>Tab</kbd> to exit</span></div>
   <dl>
@@ -774,7 +791,7 @@
       <div id="rb-info"></div>
     </div>
     <div id="rb-groups"></div>
-    <div class="psec npc-hint rb-keys">Click or drag: place · Z, X: turn · Page Up, Page Down: height · wheel or [ ]: next piece (Shift and the wheel: move) · right-click: take away a piece you added · Escape: done<br>Room sets: select objects anywhere, right-click, Save as a room set.</div>
+    <div class="psec npc-hint rb-keys">Room sets: select objects anywhere, right-click and choose Save as a room set.</div>
   </div>
   <div id="sheet-grip" class="touch-only" title="Drag to make the panel taller or shorter"></div>
   <div class="phead">

@@ -2907,6 +2907,7 @@ function closePainter() {
   endStroke();
   painter.on = false;
   painter.point = null;
+  painter.erasing = false;
   setGhost(null);
   document.body.classList.remove('building');
   document.body.classList.toggle('panel-hidden', painter.hidden);
@@ -3076,7 +3077,8 @@ function moveGhost() {
   if (painter.square) painter.square.visible = false;
   if (!g) { requestRender(); return; }
   if (g.parent !== world) world.add(g);
-  g.visible = !!painter.point;
+  g.visible = !!painter.point && !painter.erasing;
+  if (!g.visible) { requestRender(); return; }
   if (painter.point) {
     g.matrix.copy(brushMatrix());
     g.matrixWorldNeedsUpdate = true;
@@ -3108,9 +3110,19 @@ function paintPoint(x, y) {
 }
 
 function paintHover(e) {
+  setErasing(e.altKey);
   painter.point = e.target === canvas && !state.looking ? paintPoint(e.clientX, e.clientY) : null;
   moveGhost();
+  if (painter.stroke?.erase) { if (e.target === canvas) paintErase(e.clientX, e.clientY); return; }
   if (painter.stroke && painter.point) paintHere();
+}
+
+// with Alt (Option) held, a click takes pieces away: no ghost, an eraser cursor
+function setErasing(on) {
+  if (!painter.on || painter.erasing === on) return;
+  painter.erasing = on;
+  canvas.style.cursor = on ? 'not-allowed' : 'crosshair';
+  moveGhost();
 }
 
 // add one object, as Add object does
@@ -3152,7 +3164,7 @@ async function paintHere() {
 }
 
 function startStroke(e) {
-  painter.stroke = { from: state.undo.length, before: entriesOf(state.edits), done: new Set(), count: 0 };
+  painter.stroke = { from: state.undo.length, before: entriesOf(state.edits), done: new Set(), count: 0, erase: e.altKey, gone: 0 };
   paintHover(e);
 }
 
@@ -3160,26 +3172,30 @@ function endStroke() {
   const s = painter.stroke;
   if (!s) return;
   painter.stroke = null;
-  if (s.count > 1) {
+  if (s.count + s.gone > 1) {
     joinSteps(s.from, s.before);
-    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = `built ${s.count} pieces`;
+    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = s.gone ? `took away ${s.gone} pieces` : `built ${s.count} pieces`;
   }
   if (s.count) status(`Placed ${s.count === 1 ? brush()?.items[0]?.o.id : `${s.count} pieces`}.`);
+  if (s.gone) status(`Took away ${s.gone === 1 ? 'a piece' : `${s.gone} pieces`}.`);
   updateDirty();
 }
 
-// a short right-click: take away the piece under the pointer if it was added in this cell
+// Alt+click: take away the piece under the pointer if it was added in this cell (in a stroke, each one it passes)
 function paintErase(x, y) {
   raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
   const hit = raycaster.intersectObjects(world.children, true).find((h) => visibleChain(h.object) && refOf(h.object));
   const obj = hit && refOf(hit.object);
   const r = obj?.userData.ref;
-  if (!r || r.origin !== 'added' || !r.editable) { status('Right-click takes away pieces added here; other objects stay.'); return; }
+  if (!r || r.origin !== 'added' || !r.editable) {
+    if (!painter.stroke?.gone) status('Alt+click takes away pieces added here; other objects stay.');
+    return;
+  }
   state.undo.push({ obj, deleted: [obj] });
   state.edits.deleted.push(r.key);
+  if (painter.stroke) painter.stroke.gone++;
   refreshVisibility();
   updateDirty();
-  status(`Took away ${r.src}.`);
 }
 
 function paintTurn(sign) { painter.yaw = wrapAngle(painter.yaw + sign * Math.PI / 2); paintInfo(); moveGhost(); }
@@ -3798,7 +3814,7 @@ window.addEventListener('mouseup', (e) => {
     state.looking = false;
     state.lookEnded = performance.now();
     if (state.lookMoved < 6 && down && e.target === canvas) {
-      if (painter.on) paintErase(down.x, down.y);
+      if (painter.on) { /* right-click only looks around while building */ }
       else if (state.placing) stopPlacing(); else openMenuAt(down.x, down.y);
     }
   }
@@ -3874,6 +3890,7 @@ window.addEventListener('keydown', (e) => {
   if (mod && k === 'd') { e.preventDefault(); duplicateSelected(); return; }
   if (mod) return;
   if (painter.on) {
+    if (e.key === 'Alt') { setErasing(true); return; }
     if (k === 'z' || k === 'x') { paintTurn(k === 'z' ? -1 : 1); return; }
     if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); paintLevel(e.key === 'PageUp' ? 1 : -1); return; }
     if (k === 'escape') { closePainter(); return; }
@@ -3911,7 +3928,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSelected(); }
   else if (/^[1-6]$/.test(e.key)) { state.moveStep = MOVE_STEPS[+e.key - 1]; $('move-step').value = state.moveStep; updateSnap(); }
 });
-window.addEventListener('keyup', (e) => state.keys.delete(e.code));
+window.addEventListener('keyup', (e) => { state.keys.delete(e.code); if (e.key === 'Alt') setErasing(false); });
 window.addEventListener('blur', () => state.keys.clear());
 
 function fly(dt) {
@@ -5098,7 +5115,10 @@ function showGuide() {
   d.querySelector('button').focus();
 }
 $('guide-btn').addEventListener('click', showGuide);
-if (/Mac|iPhone|iPad/.test(navigator.platform)) document.querySelectorAll('kbd.mod').forEach((k) => { k.textContent = 'Cmd'; });
+if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+  document.querySelectorAll('kbd.mod').forEach((k) => { k.textContent = 'Cmd'; });
+  document.querySelectorAll('kbd.alt').forEach((k) => { k.textContent = 'Option'; });
+}
 
 function sendPicture(saved) {
   if (!state.cell || $('loading').style.display !== 'none') return;
