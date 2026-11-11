@@ -33,7 +33,10 @@ body.studio #n-modes { grid-column: 1 / -1; margin: 0; }
 body.studio #sel-edit #n-modes button { justify-content: center; height: 30px; }
 #snapbox { position: fixed; left: calc(var(--vl) + 10px); top: calc(var(--vt) + 10px); z-index: 3; display: none; padding: 6px;
            background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 10px rgba(0, 0, 0, .35); }
-body.studio:is(.has-sel, .placing, .building) #snapbox { display: block; }
+body.studio:is(.has-sel, .placing, .building) #snapbox { display: flex; gap: 6px; align-items: flex-start; }
+body.studio #settings label.opt:has(#snap) { display: none; }      /* the snap box has it */
+body.studio #settings label.opt :is(select, input[type=number]) { min-width: 0; max-width: 118px; }
+.tpop .snap-steps label.opt:first-child { margin-top: 0; }
 body.studio.mouse-look #snapbox, body.studio:has(#dest-banner.open) #snapbox { display: none; }
 body.studio #qa-snaps { display: flex !important; flex-direction: column; gap: 4px; padding: 0; border: none; }
 body.studio #qa-snaps button { color: var(--dim); justify-content: flex-start !important; }

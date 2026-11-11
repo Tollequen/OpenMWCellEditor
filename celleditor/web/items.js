@@ -158,7 +158,7 @@ export function browse(folder, current) {
   return new Promise((resolve) => {
     const bg = el('div', 'dialog-bg');
     bg.innerHTML = `<div class="dialog files-dialog"><h3>${folder === 'icons' ? 'Choose an icon' : 'Choose a model'}</h3>
-      <input type="search" class="fb-search" placeholder="Words in the file's path, e.g. ${folder === 'icons' ? 'dagger' : 'w iron'}">
+      <input type="search" class="fb-search" placeholder="Search the file names, e.g. ${folder === 'icons' ? 'dagger' : 'w iron'}">
       <div class="fb-list wr-list${folder === 'icons' ? ' grid' : ''}" tabindex="0"></div><div class="npc-hint fb-more"></div>
       <div class="bar"><button class="fb-cancel">Cancel</button><button class="primary fb-ok">Choose</button></div></div>`;
     document.body.appendChild(bg);
@@ -166,18 +166,39 @@ export function browse(folder, current) {
     let pick = current || '';
     let timer = null;
     const done = (v) => { bg.remove(); resolve(v); };
-    const load = async () => {
-      const res = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                              body: JSON.stringify({ folder, query: q('.fb-search').value }) });
-      const out = await res.json();
+    // the pictures are made when a row comes into view (a model's takes a moment)
+    const seen = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        seen.unobserve(e.target);
+        const f = e.target.dataset.file;
+        (folder === 'icons' ? api.icon(f) : api.thumb(f)).then((u) => { if (u && e.target.isConnected) e.target.src = u; }).catch(() => {});
+      }
+    }, { root: q('.fb-list'), rootMargin: '300px 0px' });
+    const state = { query: null, count: 0, more: 0, busy: false, token: 0 };
+    // the next rows of the search (from the start when it changed); more load as the list is scrolled
+    const load = async (fresh = true) => {
       const list = q('.fb-list');
-      list.innerHTML = '';
+      if (!fresh && (state.busy || !state.more)) return;
+      const token = fresh ? ++state.token : state.token;
+      state.busy = true;
+      const query = q('.fb-search').value;
+      let out = {};
+      try {
+        const res = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ folder, query, start: fresh ? 0 : state.count }) });
+        out = await res.json();
+      } finally { if (token === state.token) state.busy = false; }
+      if (token !== state.token) return;
+      if (fresh) { list.innerHTML = ''; list.scrollTop = 0; state.count = 0; }
+      state.count += (out.files || []).length;
+      state.more = out.more || 0;
       for (const f of out.files || []) {
         const row = list.appendChild(el('div', 'wr-row' + (f.toLowerCase() === pick.toLowerCase() ? ' sel' : '')));
-        if (folder === 'icons') {
-          const img = row.appendChild(el('img', 'ic'));
-          api.icon(f).then((u) => { if (u) img.src = u; });
-        }
+        const img = row.appendChild(el('img', folder === 'icons' ? 'ic' : 'ic big'));
+        img.alt = '';
+        img.dataset.file = f;
+        seen.observe(img);
         row.appendChild(el('div', 'n', f));
         row.title = f;
         row.addEventListener('click', () => {
@@ -186,9 +207,13 @@ export function browse(folder, current) {
         });
         row.addEventListener('dblclick', () => done(f));
       }
-      q('.fb-more').textContent = out.more ? `${out.more} more: add words to narrow it down.` : '';
+      q('.fb-more').textContent = out.total ? `${out.total} ${folder === 'icons' ? 'icon' : 'model'}${out.total === 1 ? '' : 's'}` : 'Nothing matches.';
     };
-    q('.fb-search').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 150); });
+    q('.fb-list').addEventListener('scroll', (e) => {
+      const l = e.target;
+      if (l.scrollTop + l.clientHeight > l.scrollHeight - 500) load(false);
+    });
+    q('.fb-search').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => load(), 150); });
     q('.fb-cancel').addEventListener('click', () => done(null));
     q('.fb-ok').addEventListener('click', () => done(pick || null));
     bg.addEventListener('keydown', (e) => {
@@ -362,7 +387,7 @@ function open(info, r, place = null) {
       const l = form.appendChild(el('label', 'opt'));
       l.appendChild(el('span', null, 'Use template'));
       l.appendChild(withChooser(t, pickTemplate, useTemplate));
-      const s = choice('kindIndex', 'Kind', Object.values(KINDS));
+      const s = choice('kindIndex', 'Type', Object.values(KINDS));
       s.value = String(Object.keys(KINDS).indexOf(f.kind));
       s.addEventListener('change', () => {
         f.kind = Object.keys(KINDS)[Number(s.value)];
@@ -400,8 +425,8 @@ function open(info, r, place = null) {
       text('open_sound', 'Opening sound', { placeholder: 'None, e.g. Door Stone Open' });
       text('close_sound', 'Closing sound', { placeholder: 'None, e.g. Door Stone Close' });
     } else if (f.kind === 'CONT') {
-      num('capacity', 'Holds (weight)', { min: 0 });
-      form.appendChild(el('div', 'npc-hint', 'Put things in it with Contents…, once it stands in a cell.'));
+      num('capacity', 'Capacity (weight)', { min: 0 });
+      form.appendChild(el('div', 'npc-hint', 'Fill it with Contents… once it is placed in a cell.'));
     } else if (f.kind === 'ALCH' || f.kind === 'INGR') {
       if (f.kind === 'ALCH') {
         const l = form.appendChild(el('label', 'check'));
@@ -410,7 +435,7 @@ function open(info, r, place = null) {
         c.checked = !!f.auto;
         c.disabled = !editable;
         c.addEventListener('change', () => { f.auto = c.checked; });
-        l.append(' The game works out its value');
+        l.append(' Let the game calculate its value');
       }
       effectRows(form, f, editable);
     }
@@ -426,7 +451,7 @@ function open(info, r, place = null) {
         items: allEnchants().map((e) => ({ id: e.id, type: e.type, note: (e.effects || []).join(', '), detail: enchantLines(e).slice(1) })) }) });
       if (editable) {
         const make = el('button', null, 'New…');
-        make.title = 'Make a new enchantment for it';
+        make.title = 'Create a new enchantment for this item';
         make.addEventListener('click', async (e) => {
           e.preventDefault();
           const id = await api.magic().create({ kind: 'ENCH', type: f.kind === 'WEAP' ? 1 : f.kind === 'BOOK' ? 0 : 3 });
@@ -449,7 +474,7 @@ function open(info, r, place = null) {
       showEffects();
     }
     if (f.kind === 'WEAP') {
-      choice('wtype', 'Type', WEAPON_TYPES);
+      choice('wtype', 'Weapon type', WEAPON_TYPES);
       num('health', 'Health', { min: 0 });
       num('speed', 'Speed', { step: 0.05, min: 0 });
       num('reach', 'Reach', { step: 0.05, min: 0 });
@@ -458,7 +483,7 @@ function open(info, r, place = null) {
         num(k + '_max', `${l} damage, most`, { min: 0, max: 255 });
       }
       flag('wflags', 2, 'Silver');
-      flag('wflags', 1, 'Hits creatures only magic hurts');
+      flag('wflags', 1, 'Can hit creatures that normal weapons can\'t');
     } else if (f.kind === 'ARMO') {
       choice('atype', 'Slot', ARMOR_TYPES);
       num('rating', 'Armour rating', { min: 0 });
@@ -521,7 +546,7 @@ function open(info, r, place = null) {
   build();
   view.show(f.model);
   showIcon();
-  q('.it-note').textContent = isNew && place ? 'Create adds it as the object you were adding.' : isNew ? 'After Create, click where to put it (or press Escape to only keep it for inventories and chests).' : '';
+  q('.it-note').textContent = isNew && place ? 'Create places it as the object you were adding.' : isNew ? 'After Create, click where to place it (or press Escape to keep it only for inventories and containers).' : '';
 
   bg.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('.files-dialog')) { e.stopPropagation(); close(); } });
   q('.it-cancel').addEventListener('click', close);
@@ -649,5 +674,5 @@ function record(r, entry, key = entry.id.toLowerCase()) {
   if (diff.length) state.undo.push({ diff });
   api.changed(r ? r.key : null);
   api.status(r ? `${entry.name || entry.id}: this one is now ${entry.id}, a copy of ${entry.copy_of}.`
-    : entry.new && !entry.copy_of ? `Made ${entry.name || entry.id}.` : `Changed ${entry.name || entry.id}.`);
+    : entry.new && !entry.copy_of ? `Created ${entry.name || entry.id}.` : `Changed ${entry.name || entry.id}.`);
 }

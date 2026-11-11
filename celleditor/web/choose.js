@@ -2,7 +2,7 @@
 import { icon } from './icons.js';
 
 let iconOf = null;
-const MAX = 600;
+const PAGE = 200;                // rows made at a time: more as the list is scrolled
 
 export function setupChoose(a) {
   iconOf = a.icon;
@@ -82,8 +82,26 @@ export function choose({ title, items, current = '', none = null, type = '', vie
     q('.ch-as-list').addEventListener('click', () => setView(false));
     q('.ch-as-grid').addEventListener('click', () => setView(true));
     const done = (v) => { bg.remove(); resolve(v); };
+    const addRows = (upTo) => {
+      for (let i = list.children.length; i < Math.min(upTo, view.rows.length); i++) {
+        const o = view.rows[i];
+        const row = list.appendChild(el('div', 'wr-row'));
+        if (icons) row.appendChild(iconEl(o.icon, o.thumb));
+        const about = [o.name && o.name !== o.id ? o.id : '', o.type, o.note].filter(Boolean).join(' · ');
+        const t = row.appendChild(el('div', 't'));
+        t.appendChild(el('div', 'n', o.name || o.id));
+        if (about) t.appendChild(el('div', 'd', about));
+        row.title = [o.name || o.id, about].filter(Boolean).join('\n');
+        row.addEventListener('click', () => pick(i));
+        row.addEventListener('dblclick', () => { pick(i); ok(); });
+      }
+    };
+    list.addEventListener('scroll', () => {
+      if (list.scrollTop + list.clientHeight > list.scrollHeight - 400) addRows(list.children.length + PAGE);
+    });
     const pick = (k) => {
       view.sel = Math.max(0, Math.min(view.rows.length - 1, k));
+      addRows(view.sel + PAGE);
       list.querySelectorAll('.wr-row').forEach((row, i) => row.classList.toggle('sel', i === view.sel));
       list.children[view.sel]?.scrollIntoView({ block: 'nearest' });
       showDetail(view.rows[view.sel]);
@@ -96,21 +114,11 @@ export function choose({ title, items, current = '', none = null, type = '', vie
         && words.every((w) => o.id.toLowerCase().includes(w) || (o.name || '').toLowerCase().includes(w)
                                 || (o.detail || []).some((d) => d.toLowerCase().includes(w))))
         .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-      view.rows = found.slice(0, MAX);
-      q('.ch-more').textContent = found.length > MAX ? `${found.length - MAX} more: search to narrow it down.`
-        : !found.length ? (items.length ? 'Nothing matches.' : 'There\'s nothing to choose from here.') : '';
+      view.rows = found;
+      q('.ch-more').textContent = !found.length ? (items.length ? 'Nothing matches.' : 'There\'s nothing to choose from here.') : '';
       list.innerHTML = '';
-      view.rows.forEach((o, i) => {
-        const row = list.appendChild(el('div', 'wr-row'));
-        if (icons) row.appendChild(iconEl(o.icon, o.thumb));
-        const about = [o.name && o.name !== o.id ? o.id : '', o.type, o.note].filter(Boolean).join(' · ');
-        const t = row.appendChild(el('div', 't'));
-        t.appendChild(el('div', 'n', o.name || o.id));
-        if (about) t.appendChild(el('div', 'd', about));
-        row.title = [o.name || o.id, about].filter(Boolean).join('\n');
-        row.addEventListener('click', () => pick(i));
-        row.addEventListener('dblclick', () => { pick(i); ok(); });
-      });
+      list.scrollTop = 0;
+      addRows(PAGE);
       const k = view.rows.findIndex((o) => o.id.toLowerCase() === (current || '').toLowerCase());
       pick(k >= 0 && !search.value ? k : 0);
       showView();

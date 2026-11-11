@@ -700,7 +700,7 @@ function build() {
   c.autocalc.type = 'checkbox';
   c.autocalc.addEventListener('change', () => setAutocalc(c.autocalc.checked));
   auto.append(c.autocalc, 'Auto-calculate attributes, skills and health');
-  auto.title = 'The game works them out from race, class and level';
+  auto.title = 'The game calculates them from race, class and level';
   gen.appendChild(auto);
   c.autoNote = gen.appendChild(el('div', 'npc-hint'));
   const dyn = section('Health, magicka and fatigue', 'stats');
@@ -780,7 +780,7 @@ function build() {
   }, pickSpell));
   if (api.magic) {
     const make = sp.appendChild(el('button', null, 'New spell…'));
-    make.title = 'Make a new spell in your plugin and give it to this NPC';
+    make.title = 'Create a new spell in your plugin and give it to this NPC';
     make.addEventListener('click', async () => {
       const id = await api.magic.create({ kind: 'SPEL' });
       if (id) setFields({ spells: [...fields().spells, id] });
@@ -880,7 +880,7 @@ function fill() {
   const s = auto || f;
   c.autoNote.textContent = f.autocalc ? (auto ? 'Worked out by the game from race, class, sex and level; abilities that fortify magicka '
     + 'add to it (untick to set them yourself).'
-                                               : 'Worked out by the game (the race or class isn\'t in the load order).') : '';
+                                               : 'Calculated by the game (the race or class isn\'t in the load order).') : '';
   for (const k of ['health', 'magicka', 'fatigue']) { put(c[k], s[k]); c[k].disabled = f.autocalc || !editable(); }
   s.attributes.forEach((v, i) => { put(c.attributes[i], v); c.attributes[i].disabled = f.autocalc || !editable(); });
   s.skills.forEach((v, i) => { put(c.skills[i], v); c.skills[i].disabled = f.autocalc || !editable(); });

@@ -828,7 +828,7 @@
     <div class="psec rb-head"><h3>Room builder</h3><button id="rb-done" class="primary" title="Back to the editor (Escape)">Done</button></div>
     <div class="psec">
       <button id="rb-style" title="Choose another style"><i data-icon="grid"></i><span id="rb-style-name"></span><i data-icon="chevDown"></i></button>
-      <input id="rb-search" type="search" placeholder="Filter the pieces and sets" autocomplete="off">
+      <input id="rb-search" type="search" placeholder="Filter the pieces and blueprints" autocomplete="off">
     </div>
     <div class="psec rb-controls">
       <button id="rb-left" class="icon" title="Turn left (Z)"><i data-icon="rotate"></i></button>
@@ -837,7 +837,7 @@
       <div id="rb-info"></div>
     </div>
     <div id="rb-groups"></div>
-    <div class="psec npc-hint rb-keys">Room sets: select objects anywhere, right-click and choose Save as a room set.</div>
+    <div class="psec npc-hint rb-keys">Blueprints: select objects anywhere, right-click and choose Save as a blueprint.</div>
   </div>
   <div id="sheet-grip" class="touch-only" title="Drag to make the panel taller or shorter"></div>
   <div class="phead">
@@ -923,12 +923,12 @@
     <div class="pair">
       <button id="add" title="Or right-click a surface"><i data-icon="plus"></i>Add object…</button>
       <button id="add-npc" title="A new NPC: name them, then click where they should stand (or right-click a surface)"><i data-icon="person"></i>Add NPC…</button>
-      <button id="add-item" title="Make a new weapon, armour, clothing, misc item or book. To place an existing one, use Add object"><i data-icon="sword"></i>New item…</button>
+      <button id="add-item" title="Create a new item or object of your own. To place an existing one, use Add object"><i data-icon="sword"></i>New item…</button>
     </div>
-    <div class="pair one desktop-only"><button id="paint-rooms" title="Build rooms from room pieces and saved room sets: click on the grid to place them"><i data-icon="grid"></i>Room builder…</button></div>
+    <div class="pair one desktop-only"><button id="paint-rooms" title="Build rooms from room pieces and blueprints: click to place them"><i data-icon="grid"></i>Room builder…</button></div>
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
     <div class="pair one"><button id="play" title="Save, then start OpenMW in this cell, past the menu, with your plugin loaded"><i data-icon="play"></i>Test in game (OpenMW)</button></div>
-    <div class="pair one"><button id="records" title="Everything this project made or changed: items, NPCs, enchantments, spells, containers, cells and dialogue. New ones are made here too"><i data-icon="list"></i>Records…</button></div>
+    <div class="pair one"><button id="records" title="Everything this project created or changed: items, NPCs, enchantments, spells, containers, cells and dialogue. You can create new ones here too"><i data-icon="list"></i>Records…</button></div>
   </div>
   <div class="psec n-only" id="n-view"><h3>View</h3><div id="n-view-list"></div></div>
   <div class="psec n-only" id="n-project"><h3>Project</h3><div id="n-project-list"></div></div>
@@ -938,7 +938,7 @@
       <label class="opt desktop-only" title="The page loads again with the other layout">Layout <select id="layout"><option value="studio">Toolbar and inspector</option><option value="panels">One panel</option></select></label>
       <label class="opt desktop-only" id="hints-row" title="A line at the bottom of the view with the keys you can use right now">Key hints <input type="checkbox" id="hints"></label>
       <label class="opt desktop-only">Panel <select id="dock"><option value="dock">Docked</option><option value="float">Floating</option></select></label>
-      <label class="opt">Gizmo snaps to steps <input type="checkbox" id="snap"></label>
+      <label class="opt">Snap to steps <input type="checkbox" id="snap"></label>
       <label class="opt">Fly speed <input type="number" id="fly-speed" min="10" max="10000" step="10"></label>
       <label class="opt">Move step <select id="move-step"></select></label>
       <label class="opt">Rotate step <select id="rot-step"></select></label>
@@ -999,8 +999,8 @@
     <input id="pk-search" type="search" placeholder="Search by name or id, e.g. chair, crate, torch…" autocomplete="off">
     <div class="pk-row">
       <label><span id="pk-type-label">Type</span> <select id="pk-type"><option value="">All</option></select></label>
-      <button id="pk-new-cell" title="Make a new, empty interior cell in your plugin" style="display:none"><i data-icon="plus"></i>New cell…</button>
-      <button id="pk-new-item" title="Make a new weapon, armour, clothing, misc item or book, from scratch or from an existing one" style="display:none"><i data-icon="sword"></i>New item…</button>
+      <button id="pk-new-cell" title="Create a new, empty interior cell in your plugin" style="display:none"><i data-icon="plus"></i>New cell…</button>
+      <button id="pk-new-item" title="Create a new item or object, from scratch or from an existing one" style="display:none"><i data-icon="sword"></i>New item…</button>
       <span id="pk-views" class="pk-views"><button id="pk-view-list" class="icon" title="Show as a list"><i data-icon="list"></i></button><button id="pk-view-grid" class="icon" title="Show the models"><i data-icon="grid"></i></button></span>
     </div>
     <label id="pk-attach-row" class="check" style="display:none"><input type="checkbox" id="pk-attach" checked> <span id="pk-attach-label">Attach to the object below</span></label>
@@ -1094,7 +1094,7 @@
       <button id="tb-scale" class="icon tb-normal" title="Scale"><i data-icon="scale"></i></button>
       <button id="tb-full" class="icon tb-normal" title="Full screen"><i data-icon="maximize"></i></button>
     </div>
-    <button id="tb-multi" class="tb-normal" title="Select several objects: taps add them to the selection (or take them out)">Multi</button>
+    <button id="tb-multi" class="tb-normal" title="Select several objects: taps add them to the selection (or remove them)">Multi</button>
     <button id="tb-add" class="tb-normal" aria-haspopup="true" aria-expanded="false">Add</button>
     <button id="tb-undo" class="icon tb-normal" title="Undo"><i data-icon="undo"></i></button>
     <button id="tb-redo" class="icon tb-normal" title="Redo" disabled><i data-icon="redo"></i></button>

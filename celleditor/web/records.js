@@ -71,7 +71,7 @@ function tabs() {
   const remover = (sec, k, name, fresh, used, also = null) => ({
     label: fresh ? 'Delete' : 'Revert',
     blocked: fresh && used ? `In use (${used}). Remove those uses first.` : '',
-    title: fresh ? 'Remove it from the project' : 'Drop this project\'s changes to it',
+    title: fresh ? 'Remove it from the project' : 'Discard this project\'s changes to it',
     run: () => {
       api.change((edits) => { delete edits[sec][k]; also?.(edits); });
       api.status(`${fresh ? 'Deleted' : 'Reverted'} ${name}. Undo brings ${fresh ? 'it' : 'the changes'} back.`);

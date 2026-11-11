@@ -130,7 +130,7 @@ function open(old) {
   };
   build();
   if (!old) {
-    q('.cl-note').textContent = 'After Create you\'re taken there: an empty cell with a floor grid to build on.';
+    q('.cl-note').textContent = 'Create takes you to the new cell: empty, with a floor grid to build on.';
     const l = el('label', 'check cl-build');
     const b = l.appendChild(el('input'));
     b.type = 'checkbox';
@@ -157,10 +157,10 @@ function open(old) {
     }
     const taken = Object.values(api.state.edits.cells || {}).map((x) => x.name);
     let got;
-    try { got = await check(c.name, taken); } catch (err) { note('The editor didn\'t answer.'); return; }
+    try { got = await check(c.name, taken); } catch (err) { note('The editor isn\'t responding.'); return; }
     if (got.error) { note(got.error); return; }
     close();
-    record((e) => { e.cells[c.name.toLowerCase()] = c; }, `Made ${c.name}.`);
+    record((e) => { e.cells[c.name.toLowerCase()] = c; }, `Created ${c.name}.`);
     const build = f.build;
     Promise.resolve(api.go(c.name)).then(() => { if (build) api.build(); });
   });
@@ -169,7 +169,7 @@ function open(old) {
     const inside = api.state.edits.added.filter((a) => a.cell === old.name);
     if (!sure) {
       sure = true;
-      q('.cl-delete').textContent = 'Really delete';
+      q('.cl-delete').textContent = 'Yes, delete it';
       note(`Deletes ${old.name}${inside.length ? ` and the ${inside.length} object${inside.length === 1 ? '' : 's'} in it` : ''}. `
            + 'Doors that lead there keep pointing at it. Undo brings it back.');
       return;

@@ -326,7 +326,7 @@ function responseCard(t, r, n, on) {
     card.appendChild(el('div', 'dlg-text-ro', r.fields.text));
     return card;
   }
-  btn('chevUp', 'Earlier: said before the one above when both fit', () => moveUp(t, n), n === 0);
+  btn('chevUp', 'Earlier: said before the one above when both apply', () => moveUp(t, n), n === 0);
   btn('chevDown', 'Later', () => moveUp(t, n + 1), n === t.responses.length - 1);
   if (e && !r.isNew) {
     const reset = el('button', 'ghost', 'Reset');
@@ -400,7 +400,7 @@ function responseCard(t, r, n, on) {
     .filter(Boolean);
   if (other.length) body.appendChild(el('div', 'npc-hint', `Also only when the speaker has ${other.join(', ')} (kept as it is).`));
 
-  body.appendChild(el('div', 'npc-sub-h', 'Conditions (all must hold)'));
+  body.appendChild(el('div', 'npc-sub-h', 'Conditions (all must be true)'));
   const rows = el('div', 'dlg-conds');
   body.appendChild(rows);
   const conds = () => r.fields.conditions.map((c) => Object.assign({}, c));

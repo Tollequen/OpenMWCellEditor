@@ -236,10 +236,10 @@ function paintGrid() {
   const kind = snapKind(), pieces = kind === 'pieces', snapOn = gridSnap();
   const what = kind === 'builder' ? 'What the room builder places' : pieces ? 'Walls, floors and doors'
     : 'Objects other than walls, floors and doors';
-  const gridOn = `On for ${what.toLowerCase()}: they land on the grid's squares of ${grid.step}`
+  const gridOn = `On for ${what.toLowerCase()}: they snap to the grid's ${grid.step}-unit squares`
     + `${pieces ? ', 64 units apart in height, and turn by quarter turns' : ''}; the grid shows while you move them. Click to move freely.`;
-  const gridOff = `Off for ${what.toLowerCase()}. Click to make them land on the grid${pieces ? ', so they fit each other without adjusting' : ''}.`;
-  const stepsOn = `On: moves in steps of ${state.moveStep} and turns in steps of ${state.rotStep}° (Settings). Click to turn off.`;
+  const gridOff = `Off for ${what.toLowerCase()}. Click to snap them to the grid${pieces ? ', so they fit each other without adjusting' : ''}.`;
+  const stepsOn = `On: moves in steps of ${state.moveStep} and turns in steps of ${state.rotStep}° (the button beside it changes them). Click to turn off.`;
   const stepsOff = `Off. Click to move in steps of ${state.moveStep} and turn in steps of ${state.rotStep}°.`;
   for (const [id, on, yes, no] of [
     ['grid-btn', grid.on, 'On: a grid of squares on the floor under you. Click to hide it.',
@@ -952,7 +952,7 @@ setupChoose({ icon: itemIcon });
 const contentsWin = setupContents({ state, status, icon: itemIcon, entriesOf, diffOf,
                                     changed: () => { updatePanel(); updateDirty(); },
                                     newItems: () => itemsWin.newItems() });
-const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, entriesOf, diffOf, magic: () => magicWin,
+const itemsWin = setupItems({ state, status, icon: itemIcon, meshParts, thumb: thumbPicture, entriesOf, diffOf, magic: () => magicWin,
                               changed: () => { updatePanel(); updateDirty(); refreshCell(); },
                               place: (o) => startPlacing('object', { o, opts: {} }) });
 const cellsWin = setupCells({ state, status, entriesOf, diffOf, changed: (ids) => showChanges(ids, false),
@@ -1510,7 +1510,7 @@ function updateButtons() {
   $('group').textContent = (newLayout() ? { group: 'Group', ungroup: 'Ungroup', remove: 'Leave group' }
     : { group: 'Group together', ungroup: 'Ungroup', remove: 'Remove from group' })[a] || (newLayout() ? 'Group' : 'Group together');
   $('group').title = { group: 'Cmd/Ctrl+G: a click on one then selects them all', ungroup: 'Cmd/Ctrl+Shift+G',
-                       remove: 'Take just this object out of its group' }[a]
+                       remove: 'Remove just this object from its group' }[a]
     || 'Cmd/Ctrl+click more objects, then group them: a click on one then selects them all';
   $('swap').disabled = !objs.length;
   $('blueprint').style.display = state.selection.filter((o) => o.visible && o.userData.ref.mesh).length > 1 ? '' : 'none';
@@ -1608,7 +1608,7 @@ function offerDraft() {
     updateDirty();
     cellCache.clear();
     await loadCell(state.cell.name, true);
-    status('Unsaved changes restored. Undo (Ctrl/Cmd+Z) takes them back.');
+    status('Unsaved changes restored. Undo (Ctrl/Cmd+Z) removes them again.');
   };
   $('draft-drop').onclick = () => {
     $('draft-banner').classList.remove('open');
@@ -1708,7 +1708,7 @@ function redo() {
   if (state.undo.length > state.undoMark) state.redo = [];
   const r = state.redo.pop();
   if (!r) return;
-  if (r.stale) { status('That change was changed again on another device.'); updateDirty(); return; }
+  if (r.stale) { status('That change was edited again on another device.'); updateDirty(); return; }
   if (r.trimmed) status('Redone, except what another device changed since.');
   const before = entriesOf(state.edits);
   applyDiff(r.diff);
@@ -1743,7 +1743,7 @@ function applyDiff(diff) {
 function undoStep() {
   const u = state.undo.pop();
   if (!u) return;
-  if (u.stale) { status('That change was changed again on another device.'); return; }
+  if (u.stale) { status('That change was edited again on another device.'); return; }
   if (u.diff) {
     if (u.trimmed) status('Undone, except what another device changed since.');
     applyDiff(u.diff);
@@ -2743,7 +2743,7 @@ function paintPreviewStar() {
   const on = picker.star.on(o);
   b.innerHTML = icon(on ? 'starFilled' : 'star');
   b.append('Favourite');
-  b.title = on ? 'A favourite: shown first (click to take it out)' : 'Show it first in the list';
+  b.title = on ? 'A favourite: shown first (click to remove it)' : 'Show it first in the list';
   b.classList.toggle('on', on);
 }
 
@@ -4986,7 +4986,7 @@ $('play').addEventListener('click', async () => {
     status(out.ok ? `Starting OpenMW in ${state.cell.name}${out.added ? `, with ${out.plugin} loaded for this run` : ''}. It takes a moment.`
       : out.message, !out.ok);
   } catch (err) {
-    status('The editor didn\'t answer.', true);
+    status('The editor isn\'t responding.', true);
   }
   setTimeout(() => { $('play').disabled = false; }, 4000);
 });
@@ -5421,17 +5421,16 @@ function setupStudio() {
   };
   body.classList.add('studio');
 
-  const settings = tool('tb-settings', 'gear', 'Settings: steps, speeds, grid, layout');
   const keys = tool('tb-keys', 'keyboard', 'Controls: every key, and the key hints');
   $('hide-panel').title = 'Hide or show the side panels (P)';
   const top = make('div', 'topbar');
   top.append(group($('menu-btn'), $('menu')), $('cell-btn').parentElement, $('others'),
              make('span', '', 'spacer'), $('play'), $('mouselook'), sep(),
-             group(settings, $('fullscreen'), $('hide-panel')), sep(), group($('undo'), $('redo')), $('save'));
+             group($('fullscreen'), $('hide-panel')), sep(), group($('undo'), $('redo')), $('save'));
   body.append(top);
 
   const pops = [];
-  const pop = (btn, title, content, wide) => {
+  const pop = (btn, title, content, wide, left) => {
     const p = make('div', '', 'tpop' + (wide ? ' wide' : ''));
     const h = make('h3');
     h.textContent = title;
@@ -5447,13 +5446,20 @@ function setupStudio() {
       const up = r.top > window.innerHeight / 2;
       p.style.top = up ? '' : (r.bottom + 8) + 'px';
       p.style.bottom = up ? (window.innerHeight - r.top + 8) + 'px' : '';
-      p.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+      p.style.right = left ? '' : Math.max(8, window.innerWidth - r.right) + 'px';
+      p.style.left = left ? r.left + 'px' : '';
     });
   };
-  pop(settings, 'Settings', $('settings'));
+  // Settings: the step sizes go with the snap switches (behind their adjust button); the rest stays a section of
+  // the rail that folds, as in the one-panel layout
+  const row = (id) => $(id).closest('label');
+  const steps = make('div', 'snap-steps');
+  steps.append(row('move-step'), row('rot-step'), row('grid-step'));
+  const adjust = tool('snap-adjust', 'sliders', 'Step sizes and grid squares');
+  $('n-project').after($('settings'));
   pop(keys, 'Controls', $('controls-help'), true);
   const closePops = () => { for (const [, p] of pops) p.classList.remove('open'); };
-  window.addEventListener('pointerdown', (e) => { if (!e.target.closest('.tpop, #tb-settings, #tb-keys')) closePops(); }, true);
+  window.addEventListener('pointerdown', (e) => { if (!e.target.closest('.tpop, #snap-adjust, #tb-keys')) closePops(); }, true);
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePops(); });
   $('guide-btn').addEventListener('click', closePops);
 
@@ -5464,8 +5470,9 @@ function setupStudio() {
   body.append(insp);
   $('sel-edit').prepend($('n-modes'));
   const snaps = make('div', 'snapbox');                 // the snap switches: at the view's top left, while they apply
-  snaps.append($('qa-snaps'));
+  snaps.append($('qa-snaps'), adjust);
   body.append(snaps);
+  pop(adjust, 'Steps and grid', steps, false, true);
   const close = tool('insp-close', 'x', 'Deselect (Esc)');
   close.classList.add('ghost');
   close.addEventListener('click', () => select(null));

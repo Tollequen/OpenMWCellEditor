@@ -903,8 +903,8 @@ def item_new_id(base, taken=()):
 _listings = {}
 
 
-def game_files(folder, query, limit=200):
-    """Meshes or icons of the game whose path has every word of the query."""
+def game_files(folder, query, limit=200, start=0):
+    """Meshes or icons of the game whose path has every word of the query: `limit` of them from `start`."""
     exts = {"meshes": (".nif",), "icons": (".tga", ".dds", ".bmp")}.get(folder)
     if not exts:
         raise KeyError(folder)
@@ -914,7 +914,8 @@ def game_files(folder, query, limit=200):
     found = [f for f in _listings[folder] if all(w in f for w in words)]
     if folder == "icons":                     # an icon is named .tga in records, as the game's are
         found = sorted({os.path.splitext(f)[0] + ".tga" for f in found})
-    return {"files": found[:limit], "more": max(0, len(found) - limit)}
+    start = max(0, int(start))
+    return {"files": found[start:start + limit], "more": max(0, len(found) - start - limit), "total": len(found)}
 
 
 def container_new_id(base, taken=()):
@@ -1667,7 +1668,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(item_new_id(body["base"], body.get("taken") or [])).encode())
             if u.path == "/api/files":
                 try:
-                    return self.reply(json.dumps(game_files(body["folder"], body.get("query") or "")).encode())
+                    return self.reply(json.dumps(game_files(body["folder"], body.get("query") or "", start=body.get("start") or 0)).encode())
                 except KeyError:
                     return self.reply(b"{}", code=404)
             if u.path == "/api/container/new-id":

@@ -133,7 +133,7 @@
   <section data-screen="new">
     <button class="ghost back" data-back="projects"><i data-icon="chevLeft"></i>Projects</button>
     <h1>New project</h1>
-    <div class="seg"><button data-mode="new">Make a new content file</button><button data-mode="edit">Edit a content file</button></div>
+    <div class="seg"><button data-mode="new">Create a new content file</button><button data-mode="edit">Edit a content file</button></div>
     <div class="form">
       <div id="n-new">
         <div class="frow"><div class="flabel">Name</div>
@@ -361,7 +361,7 @@ function renderProjects() {
   const list = $('project-list');
   list.innerHTML = '';
   if (!home.projects.length) {
-    list.appendChild(el('div', 'empty-note', 'No projects yet. A project edits a content file, or makes a new one.'));
+    list.appendChild(el('div', 'empty-note', 'No projects yet. A project edits a content file, or creates a new one.'));
   }
   for (const p of home.projects) {
     const row = el('div', 'proj');

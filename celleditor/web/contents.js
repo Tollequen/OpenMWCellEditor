@@ -59,9 +59,9 @@ function dialog(html, cls) {
 export function askScope(info, noun = 'containers', what = 'The contents belong') {
   return new Promise((resolve) => {
     const bg = dialog(`<h3>Change which ${noun}?</h3>
-      <p>${what} to the kind <b></b>, which other ${noun} in the game may use too.</p>
-      <label class="check"><input type="radio" name="cs" value="one" checked> <span>Only this one: it becomes a copy of its own</span></label>
-      <label class="check"><input type="radio" name="cs" value="all"> <span>Every one of this kind, everywhere in the game</span></label>
+      <p>${what} to the base object <b></b>, which other ${noun} in the game may share.</p>
+      <label class="check"><input type="radio" name="cs" value="one" checked> <span>Only this one: it gets its own copy</span></label>
+      <label class="check"><input type="radio" name="cs" value="all"> <span>Every one that uses this base object, everywhere in the game</span></label>
       <div class="bar"><button class="cs-cancel">Cancel</button><button class="primary cs-ok">Change</button></div>`, 'scope-dialog');
     bg.querySelector('b').textContent = `${info.name || info.id} (${info.id})`;
     const done = (v) => { bg.remove(); resolve(v); };
@@ -96,7 +96,7 @@ async function open(r) {
       </div>
     </div>
     <div class="npc-hint ct-note"></div>
-    <div class="bar"><span class="npc-hint">Double-click or Enter puts one in</span><button class="ct-cancel">Cancel</button><button class="primary ct-done">Done</button></div>`,
+    <div class="bar"><span class="npc-hint">Double-click or press Enter to add one</span><button class="ct-cancel">Cancel</button><button class="primary ct-done">Done</button></div>`,
   'contents-dialog');
   const q = (c) => bg.querySelector(c);
   q('.ct-title').textContent = `${info.name || info.id}: contents`;
@@ -131,7 +131,7 @@ async function open(r) {
       if (!o) name.classList.add('bad');
       const rm = row.appendChild(el('button', 'ghost icon'));
       rm.innerHTML = icon('x');
-      rm.title = 'Take out';
+      rm.title = 'Remove';
       rm.disabled = !editable;
       rm.addEventListener('click', () => { contents.splice(i, 1); drawInside(); });
     });
@@ -231,6 +231,6 @@ async function apply(r, info, change, scope) {
   if (diff.length) state.undo.push({ diff });
   api.changed();
   const n = change.contents.length;
-  api.status(`${info.name || info.id}: ${n ? `${n} kind${n > 1 ? 's' : ''} of item inside` : 'empty'}`
-    + (scope === 'one' ? ` (this one is now ${id}, a copy of ${info.id}).` : info.own ? '.' : ' (every one of this kind).'));
+  api.status(`${info.name || info.id}: ${n ? `${n} different item${n > 1 ? 's' : ''} inside` : 'empty'}`
+    + (scope === 'one' ? ` (this one is now ${id}, a copy of ${info.id}).` : info.own ? '.' : ' (everywhere this base object is used).'));
 }

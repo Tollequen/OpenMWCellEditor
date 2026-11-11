@@ -163,7 +163,7 @@ async function open({ kind, type = 0, name = '' }, old) {
       const auto = al.appendChild(el('input'));
       auto.type = 'checkbox';
       auto.checked = f.auto;
-      al.append(kind === 'ENCH' ? ' The game works out the cost and charge' : ' The game works out the cost');
+      al.append(kind === 'ENCH' ? ' Let the game calculate the cost and charge' : ' Let the game calculate the cost');
       auto.addEventListener('change', () => { f.auto = auto.checked; buildForm(); });
       if (!f.auto) {
         row(kind === 'ENCH' ? 'Cost to cast' : 'Magicka cost', num(f.cost, (v) => { f.cost = v; }));
@@ -208,7 +208,7 @@ async function open({ kind, type = 0, name = '' }, old) {
         }
         const rm = top.appendChild(el('button', 'ghost icon'));
         rm.innerHTML = icon('x');
-        rm.title = 'Take this effect away';
+        rm.title = 'Remove this effect';
         rm.addEventListener('click', () => { f.effects.splice(k, 1); buildEffects(); preview(); });
         const nums = line.appendChild(el('div', 'mg-row mg-nums'));
         const field = (label, key, show) => {
@@ -266,13 +266,13 @@ async function open({ kind, type = 0, name = '' }, old) {
     q('.mg-cancel').addEventListener('click', () => done(null));
     q('.mg-done').addEventListener('click', async () => {
       if (!f.effects.length) { note('Add an effect first.'); return; }
-      if (f.effects.some((e) => e.min > e.max)) { note('A least magnitude is more than its most.'); return; }
+      if (f.effects.some((e) => e.min > e.max)) { note('An effect\'s lowest magnitude is higher than its highest.'); return; }
       if (kind === 'SPEL' && !f.name.trim()) { note('Give the spell a name.'); return; }
       let id = old?.id;
       if (!old) try {
         id = (await post('/api/magic/new-id', { base: f.id || idFrom(f.name) || (kind === 'ENCH' ? 'new_en' : 'new_spell'),
                                                 taken: Object.values(api.state.edits.magic || {}).map((m) => m.id) })).id;
-      } catch (err) { note('The editor didn\'t answer.'); return; }
+      } catch (err) { note('The editor isn\'t responding.'); return; }
       const m = { ...(old && !old.new ? {} : { new: true }), kind, id, type: f.type, cost: f.cost, charge: f.charge, auto: f.auto,
                   effects: f.effects.map((e) => ({ ...e })), ...(kind === 'SPEL' ? { name: f.name.trim(), always: f.always } : {}) };
       done(id);
@@ -283,7 +283,7 @@ async function open({ kind, type = 0, name = '' }, old) {
       if (diff.length) api.state.undo.push({ diff });
       api.changed();
       try { lineCache.set(id.toLowerCase(), await post('/api/magic/lines', { kind, type: m.type, effects: m.effects })); } catch (err) { /* later */ }
-      api.status(old ? `Changed the ${what} ${id}.` : `Made the ${what} ${id}.`);
+      api.status(old ? `Changed the ${what} ${id}.` : `Created the ${what} ${id}.`);
     });
   });
 }
