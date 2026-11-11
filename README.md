@@ -45,6 +45,7 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
   - Build interiors from the game's own wall and floor pieces, snapped to a grid.
   - Start from a ready-made blueprint: a house, tavern, chapel or hut.
   - Save any selection or a whole cell as your own blueprint and place it again anywhere.
+  - **Blueprints** in the left panel lists them all with a 3D preview.
 
 - **Items, Containers & Magic**:
   - Create weapons, armour, clothing, books, potions, ingredients, lights, statics, activators, doors and containers.

@@ -87,7 +87,7 @@ const idFrom = (name) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').r
 
 // --- A small model viewer ------------------------------------------------------------
 
-function viewer(canvas) {
+export function viewer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   const scene = new THREE.Scene();
@@ -139,6 +139,28 @@ function viewer(canvas) {
       if (token !== v.token) return;
       group.clear();
       for (const p of parts) group.add(new THREE.Mesh(p.geometry, p.material));
+      const box = new THREE.Box3().setFromObject(group);
+      if (box.isEmpty()) { v.center.set(0, 0, 0); v.dist = 100; } else {
+        const s = box.getBoundingSphere(new THREE.Sphere());
+        v.center.copy(s.center);
+        v.dist = Math.max(s.radius, 4) / Math.sin((camera.fov / 2) * Math.PI / 180) * 1.05;
+      }
+      v.dirty = true;
+    },
+    // several models, each {mesh, matrix}: a blueprint
+    async showGroup(list) {
+      const token = ++v.token;
+      const all = await Promise.all(list.map((it) => (it.mesh ? api.meshParts(it.mesh) : [])));
+      if (token !== v.token) return;
+      group.clear();
+      list.forEach((it, k) => {
+        const g = new THREE.Group();
+        for (const p of all[k]) g.add(new THREE.Mesh(p.geometry, p.material));
+        g.matrixAutoUpdate = false;
+        g.matrix.copy(it.matrix);
+        group.add(g);
+      });
+      group.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(group);
       if (box.isEmpty()) { v.center.set(0, 0, 0); v.dist = 100; } else {
         const s = box.getBoundingSphere(new THREE.Sphere());

@@ -743,6 +743,14 @@
     .dlg-more-b .npc-f { grid-template-columns: 110px minmax(0, 1fr); }
   }
   body.touch #npc-box input, body.touch #npc-box select { font-size: 16px; }
+  /* Blueprints (blueprints.js) */
+  .dialog.bp-dialog { width: min(760px, 100%); display: flex; flex-direction: column; }
+  .bp-main { display: flex; gap: 12px; min-height: 0; }
+  .bp-list { flex: 1 1 45%; height: min(420px, 55vh); }
+  .bp-side { flex: 1 1 55%; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .bp-view { width: 100%; height: 240px; border-radius: var(--radius); background: #1c1c24; touch-action: none; cursor: grab; }
+  .bp-name { font-weight: 600; }
+  .bp-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   /* Records (records.js) */
   .dialog.records-dialog { width: min(760px, 100%); display: flex; flex-direction: column; }
   .rc-head { display: flex; align-items: center; }
@@ -765,9 +773,9 @@
   .rc-del:not(:disabled) { color: var(--bad); border-color: rgba(232, 135, 127, .35); }
   .records-dialog .bar { align-items: center; }
   .records-dialog .rc-note { margin: 0; }
-  body.layout-new #n-project-list #records .lab { display: flex; flex-direction: column; text-align: left; min-width: 0; white-space: normal; line-height: 1.25; }
-  body.layout-new #n-project-list #records .lab small { color: var(--dim); font-size: 11.5px; }
-  body.layout-new #n-project-list #records { height: auto; padding: 6px 10px; gap: 10px; }
+  body.layout-new #n-project-list :is(#records, #blueprints) .lab { display: flex; flex-direction: column; text-align: left; min-width: 0; white-space: normal; line-height: 1.25; }
+  body.layout-new #n-project-list :is(#records, #blueprints) .lab small { color: var(--dim); font-size: 11.5px; }
+  body.layout-new #n-project-list :is(#records, #blueprints) { height: auto; padding: 6px 10px; gap: 10px; }
 </style>
 <link rel="stylesheet" href="studio.css">
 <script type="importmap">
@@ -927,6 +935,7 @@
     <div class="pair one"><button id="history" title="Every save, and what it changed"><i data-icon="clock"></i>History…</button></div>
     <div class="pair one"><button id="play" title="Save, then start OpenMW in this cell, past the menu, with your plugin loaded. You start at the flag: the first time it asks where; Shift+click to choose again"><i data-icon="play"></i>Test in game (OpenMW)</button></div>
     <div class="pair one"><button id="records" title="Everything this project created or changed: items, NPCs, enchantments, spells, containers, cells and dialogue. You can create new ones here too"><i data-icon="list"></i>Records…</button></div>
+    <div class="pair one desktop-only"><button id="blueprints" title="Ready-made rooms and the groups of objects you saved: look at them, place them, delete yours"><i data-icon="home"></i>Blueprints…</button></div>
   </div>
   <div class="psec n-only" id="n-view"><h3>View</h3><div id="n-view-list"></div></div>
   <div class="psec n-only" id="n-project"><h3>Project</h3><div id="n-project-list"></div></div>

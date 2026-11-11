@@ -16,6 +16,7 @@ import { ROOMS } from './rooms.js';
 import { setupChoose, choose, withChooser } from './choose.js';
 import { setupGamepad } from './gamepad.js';
 import { setupRecords } from './records.js';
+import { setupBlueprints } from './blueprints.js';
 
 const $ = (id) => document.getElementById(id);
 fillIcons();
@@ -3153,10 +3154,37 @@ function blueprintsOf(catalog, sets) {
   }).filter(Boolean);
 }
 // as the Add object window lists them
+const blueprintItem = (b) => ({ id: b.name, name: '', type: 'Blueprint', cat: 'Blueprints', rank: -1, mesh: b.items[0].o.mesh,
+                                file: '', blueprint: b });
 function blueprintItems(catalog, sets) {
-  return blueprintsOf(catalog, sets).map((b) => ({ id: b.name, name: '', type: 'Blueprint', cat: 'Blueprints',
-    rank: -1, mesh: b.items[0].o.mesh, file: '', blueprint: b }));
+  return blueprintsOf(catalog, sets).map(blueprintItem);
 }
+
+// The Blueprints window (blueprints.js): the list, a look at one, and placing it in the cell or in the room builder
+const blueprintsWin = setupBlueprints({
+  status, closed: () => resumeFlySoon(),
+  list: async () => blueprintsOf(await opening(getCatalog()), await roomSets()),
+  matrix: (it) => refMatrix({ pos: it.rel, rot: it.rot, scale: it.scale }),
+  place: (b) => {
+    const why = state.cell ? cantAdd() : 'Open a cell first.';
+    if (why) { status(why, true); return; }
+    closePainter();
+    stopPlacing();
+    startPlacing('object', { o: blueprintItem(b), opts: {} });
+  },
+  build: async (b) => {
+    await openPainter();
+    const s = painter.on && painter.ready.find((x) => x.name === b.name);
+    if (s) pickSet(s);
+  },
+  remove: async (b) => {
+    if (!sureDelete(b.name)) return false;
+    painter.sets = await roomSets((await roomSets()).filter((x) => x.name !== b.name));
+    status(`Deleted the blueprint ${b.name}.`);
+    if (painter.on) filterPainter();
+    return true;
+  },
+});
 
 async function roomSets(sets = null) {
   try {
@@ -5115,6 +5143,7 @@ function watchGame() {
 }
 fetch('/api/play/running').then((r) => r.json()).then((o) => { if (o.running) watchGame(); }).catch(() => {});
 $('records').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); closeMenu(); recordsWin.open(); });
+$('blueprints').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); closeMenu(); blueprintsWin.open(); });
 
 // --- Project panel ---------------------------------------------------------------------
 
@@ -5320,7 +5349,7 @@ async function save() {
 
 const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-r'], ['add', 'n-add-pair'],
   ['add-npc', 'n-add-pair'], ['add-item', 'n-add-pair'], ['paint-rooms', 'n-add'], ['mode-move', 'n-modes'], ['mode-turn', 'n-modes'], ['mode-scale', 'n-modes'],
-  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['play', 'n-project-list'], ['history', 'n-project-list'], ['records', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
+  ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['play', 'n-project-list'], ['history', 'n-project-list'], ['records', 'n-project-list'], ['blueprints', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
 const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', blueprint: 'home', reset: 'reset',
@@ -5514,7 +5543,8 @@ function richPanel() {
   for (const [id, name, what] of [['add', 'Object…', 'Furniture, clutter, lights, doors, creatures'],
     ['add-npc', 'NPC…', 'A new person, or one of the game\'s'], ['add-item', 'New item or object…', 'Your own weapon, potion, light, static…'],
     ['paint-rooms', 'Room builder…', 'Walls and floors, placed on a grid'],
-    ['records', 'Records…', 'Items, NPCs, magic and cells in this project']]) {
+    ['records', 'Records…', 'Items, NPCs, magic and cells in this project'],
+    ['blueprints', 'Blueprints…', 'Ready-made rooms and your saved groups']]) {
     const b = $(id);
     for (const n of [...b.childNodes]) if (n.nodeType === Node.TEXT_NODE) n.remove();
     const lab = document.createElement('span'), small = document.createElement('small');
