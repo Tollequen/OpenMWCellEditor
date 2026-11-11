@@ -21,11 +21,13 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
    - **Select & Move**: Click any object to show the transform gizmo (`T` move, `R` rotate, `Y` scale), or nudge with arrow keys.
    - **Add Objects**: Right-click any surface or click **Add object...** to place items directly from the categorized 3D catalog.
    - **Smart Cluttering**: Press `G` to drop items cleanly onto surfaces below, and `B` to attach clutter to tables so they move together.
+   - **Add many**: Tick **Add many** in the Add object window (or `Shift`+click an object) to keep placing it. `Z` / `X` turn it and `C` flips it before you click.
    - **Navigation**: Right-click and drag to look around, or press `Tab` for optional Fly Mode.
 
 4. **Save and Play**
    - Press `Ctrl+S` (or `Cmd+S` on macOS) to save.
    - Enable your plugin in the OpenMW launcher.
+   - Or click **Test in game** to save and start OpenMW in the cell you are editing.
 
 ---
 
@@ -39,13 +41,27 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
   - **Visual 3D Catalog**: Searchable object browser with live 3D preview, a grid of model pictures, star favorites, and mod-specific filtering.
   - **Simulate Lighting**: See a cell lit as in OpenMW (its own ambient light and every light source's colour and radius) instead of the editor's even light, and watch it change as you move lights. Exteriors show a clear night.
 
+- **Room Builder & Blueprints**:
+  - Build interiors from the game's own wall and floor pieces, snapped to a grid.
+  - Start from a ready-made blueprint: a house, tavern, chapel or hut.
+  - Save any selection or a whole cell as your own blueprint and place it again anywhere.
+
+- **Items, Containers & Magic**:
+  - Create weapons, armour, clothing, books, potions, ingredients, lights, statics, activators, doors and containers.
+  - Edit container contents, owners, locks and traps.
+  - Create and edit enchantments and spells.
+
+- **Records & Test in Game**:
+  - **Records** lists everything your project created or changed, and where it is used.
+  - **Test in game** starts OpenMW in the current cell with your plugin loaded.
+
 - **NPC & Dialogue Editor (Beta)**:
   - **Create & Place NPCs**: Click **Add NPC...** or right-click to create new NPCs.
   - **Character Customization**: Edit appearance (head, hair), factions, ranks, attributes/skills, inventory, AI behavior, and merchant services.
   - **Dialogue & Topics**: Add or modify greetings and topic responses. Set conditions (journal stages, items, variables, functions) and execution scripts.
 
 - **Mobile Version**:
-  - Go to **Settings > Open on another device...** to reveal a local QR code and PIN.
+  - Click **Open on another device...** in the left panel to reveal a local QR code and PIN.
   - Scan with your phone or tablet to use the editor with touch controls.
 
 - **Controller Support**:
@@ -85,6 +101,9 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
 | Nudge horizontal | Arrow Keys |
 | Nudge vertical | `Shift` + `↑` / `↓` (or `PgUp` / `PgDn`) |
 | Rotate horizontal | `Z` / `X` |
+| Turn while placing | `Z` / `X` |
+| Flip while placing | `C` |
+| Keep placing | `Shift + Click` |
 | Set Move Step | `1` – `6` |
 | Focus selected object | `F` |
 | Duplicate selected object | `Ctrl + D` (`Cmd + D` on macOS), or right-click > Duplicate |

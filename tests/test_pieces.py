@@ -30,6 +30,14 @@ class Find(unittest.TestCase):
         self.assertEqual(pieces.find([path], objects), ["in_x_djamb", "in_x_door", "in_x_room_corner", "in_x_room_side"])
 
 
+
+class StartInGame(unittest.TestCase):
+    def test_start_command(self):
+        from celleditor import server
+        self.assertEqual(server.start_command("My Room", [10, -20.26, 4]), 'player->positioncell 10.0 -20.3 4.0 0.0 "My Room"')
+        self.assertEqual(server.start_command("Seyda Neen (-2, -9)", [-20000, 17000, 300], 90), "player->position -20000.0 17000.0 300.0 90.0")
+
+
 if __name__ == "__main__":
     unittest.main()
 

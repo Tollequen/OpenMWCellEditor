@@ -1103,6 +1103,7 @@ async function loadCell(name, keepCamera = false) {
   await Promise.all(jobs);
   state.loadingCell = false;
   showGrid();
+  showStartFlag();
   refreshVisibility();
   updateMarkers();
   $('loading').style.display = 'none';
@@ -1581,6 +1582,8 @@ function updateDirty() {
   $('save').classList.toggle('dirty', state.dirty);
   $('save').title = state.dirty ? 'Save (Ctrl/Cmd+S): there are unsaved changes' : 'Save (Ctrl/Cmd+S): nothing unsaved';
   $('tb-save').textContent = state.dirty ? 'Save *' : 'Save';
+  const label = $('save').querySelector('.n-lbl');
+  if (label) label.textContent = state.dirty ? 'Save *' : 'Save';
   refreshNpcBodies();
   syncSoon();
 }
@@ -2761,6 +2764,114 @@ function surfaceAt(ndcX, ndcY) {
   return raycaster.intersectObjects(world.children, true).find((h) => visibleChain(h.object) && !h.object.userData.water);
 }
 
+// --- Where Test in game starts ---
+// The player's start in a cell is chosen once, with a click on a floor, and kept in the browser per project and
+// cell ({at, yaw in degrees}); a flag shows it. OpenMW's own choice (a door's arrival point, else some object's
+// place) can be outside the room.
+const startKey = () => 'ce-start:' + (state.data?.project?.plugin || '');
+function startSpots() {
+  try { return JSON.parse(localStorage.getItem(startKey()) || '{}') || {}; } catch (err) { return {}; }
+}
+const startSpot = () => (state.cell ? startSpots()[state.cell.name.toLowerCase()] || null : null);
+function keepStartSpot(spot) {
+  const all = startSpots();
+  all[state.cell.name.toLowerCase()] = spot;
+  try { localStorage.setItem(startKey(), JSON.stringify(all)); } catch (err) { /* private mode: asked again next time */ }
+  showStartFlag();
+}
+
+const startFlag = new THREE.Group();
+{
+  const mat = (color) => new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 70, 8), mat(0xffffff));
+  pole.rotation.x = Math.PI / 2;
+  pole.position.z = 35;
+  const cloth = new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position',
+    new THREE.Float32BufferAttribute([0, 0, 70, 0, 0, 46, 26, 0, 58], 3)), mat(0x4caf7a));
+  const foot = new THREE.Mesh(new THREE.RingGeometry(9, 12, 24), mat(0x4caf7a));
+  foot.position.z = 1;
+  startFlag.add(pole, cloth, foot);
+  startFlag.traverse((o) => { o.renderOrder = 9; o.raycast = () => {}; });
+  startFlag.visible = false;
+}
+function showStartFlag() {
+  const spot = startSpot();
+  if (startFlag.parent !== world) world.add(startFlag);
+  startFlag.visible = !!spot;
+  if (spot) {
+    startFlag.position.set(spot.at[0], spot.at[1], spot.at[2]);
+    startFlag.rotation.z = -spot.yaw * DEG;
+  }
+  requestRender();
+}
+
+// A click on the flag opens a small menu: put it somewhere else (as when it was first set), or remove it.
+function flagUnder(ray, nearest = Infinity) {
+  if (!startFlag.visible) return false;
+  const a = startFlag.position, b = a.clone().setZ(a.z + 70);
+  const onRay = new THREE.Vector3(), onPole = new THREE.Vector3();
+  const d2 = ray.distanceSqToSegment(a, b, onRay, onPole);
+  return d2 < 16 * 16 && onRay.distanceTo(ray.origin) < nearest + 20;
+}
+function flagMenu(ndcX, ndcY) {
+  closeMenu();
+  const m = $('ctxmenu');
+  m.innerHTML = '';
+  const head = m.appendChild(document.createElement('div'));
+  head.className = 'mh';
+  head.textContent = 'Where Test in game starts';
+  for (const [label, fn] of [['Reposition…', async () => { const spot = await askStartSpot(); if (spot) keepStartSpot(spot); }],
+                             ['Delete', forgetStartSpot]]) {
+    const d = m.appendChild(document.createElement('div'));
+    d.className = 'mi';
+    d.textContent = label;
+    d.addEventListener('click', () => { closeMenu(); fn(); });
+  }
+  m.classList.add('open');
+  const r = canvas.getBoundingClientRect();
+  const x = r.left + (ndcX + 1) / 2 * r.width, y = r.top + (1 - ndcY) / 2 * r.height;
+  m.style.left = Math.min(x + 16, window.innerWidth - m.offsetWidth - 6) + 'px';
+  m.style.top = Math.min(y + 16, window.innerHeight - m.offsetHeight - 6) + 'px';
+}
+function forgetStartSpot() {
+  const all = startSpots();
+  delete all[state.cell.name.toLowerCase()];
+  try { localStorage.setItem(startKey(), JSON.stringify(all)); } catch (err) { /* private mode */ }
+  showStartFlag();
+  status('Start flag removed: Test in game asks where to start the next time.');
+}
+
+// asks for a click on a floor; resolves to {at, yaw} or null (Escape, Cancel)
+function askStartSpot() {
+  if (state.picking) return Promise.resolve(null);
+  stopPlacing();
+  if (document.pointerLockElement) pauseFly();
+  return new Promise((resolve) => {
+    state.picking = { resolve };
+    $('place-text').textContent = 'Click the floor where you want to start in the game. The flag marks it, and the editor remembers it for this cell.';
+    $('place-banner').classList.add('open');
+    canvas.style.cursor = 'crosshair';
+    resize();
+  });
+}
+function endPick(spot) {
+  const p = state.picking;
+  if (!p) return;
+  state.picking = null;
+  $('place-banner').classList.remove('open');
+  $('place-text').textContent = 'Click where to place the object (a floor, a table, a wall).';
+  canvas.style.cursor = painter.on ? 'crosshair' : '';
+  resize();
+  p.resolve(spot);
+}
+function pickStartAt(ndcX, ndcY) {
+  const hit = surfaceAt(ndcX, ndcY);
+  const up = hit && hit.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).z > 0.5;
+  if (!up) { status('Click a floor (or the ground): somewhere the player can stand.', true); return; }
+  endPick({ at: [hit.point.x, hit.point.y, hit.point.z + 4].map((v) => Math.round(v * 10) / 10),
+            yaw: Math.round(wrapAngle(state.yaw) / DEG) });
+}
+
 function cantAdd() {
   if (state.cell.canAdd !== false) return null;
   const p = state.data.project;
@@ -2980,7 +3091,7 @@ function placeAt(ndcX, ndcY, again = false) {
   addAt(hit, kind, preset && { ...preset, turn });
 }
 
-$('place-cancel').addEventListener('click', () => stopPlacing());
+$('place-cancel').addEventListener('click', () => { stopPlacing(); endPick(null); });
 
 // --- Room builder -----------------------------------------------------------
 // A mode for building rooms: the panel shows a style's room pieces by what they're for (the server finds the
@@ -2988,7 +3099,7 @@ $('place-cancel').addEventListener('click', () => stopPlacing());
 // chosen piece or blueprint on the grid square under the pointer (anywhere with snap to grid off). Z and X turn it by quarter turns, Page Up and Page
 // Down change the height by 64, [ and ] pick the next piece, Alt+click removes a piece added here.
 
-const painter = { on: false, style: '', all: [], pieces: [], at: 0, set: null, sets: [], ready: [], yaw: 0, level: 0,
+const painter = { on: false, style: null, all: [], pieces: [], at: 0, set: null, sets: [], ready: [], yaw: 0, level: 0,
                   ghost: null, ghostKey: '', square: null, stroke: null, point: null, token: 0,
                   thumbObserver: null, lift: 0, known: null, hidden: false };
 const STYLE_ALIASES = { lava: 'lavacave', mold: 'moldcave', mud: 'mudcave', py: 'pycave', bone: 'bonecave',
@@ -3019,6 +3130,7 @@ function styleOf(o) {
   return `${m[1]}_${STYLE_ALIASES[k] || k}`;
 }
 function styleName(key) {
+  if (key == null) return 'Choose a style…';
   if (!key) return 'All room pieces';
   const [side, k] = [key.slice(0, 2), key.slice(3)];
   return STYLE_NAMES[k] ? STYLE_NAMES[k] + (side === 'ex' ? ' (outside)' : '') : key;
@@ -3078,7 +3190,7 @@ async function chooseStyle() {
   const shows = (list) => [/room.*corner/, /hall|corr/, /room|corner|side/, /wall|_w_/]
     .map((re) => list.find((o) => re.test(o.id) && plain(o))).find(Boolean) || list.find(plain) || list[0];
   return choose({
-    title: 'Room builder: choose a style', none: 'All room pieces', current: painter.style, views: false,
+    title: 'Room builder: choose a style', none: 'All room pieces', current: painter.style || '', views: false,
     items: [...styles].filter(([, list]) => list.length >= 6).map(([k, list]) => ({
       id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${list.length} pieces`,
       thumb: () => thumbPicture(shows(list).mesh) })) });
@@ -3093,11 +3205,6 @@ async function openPainter(at = null) {
   closeMenu();
   stopPlacing();
   if (!await loadPieces()) return;
-  if (!painter.style) {                          // the first time; then the style button changes it
-    const style = await chooseStyle();
-    if (style == null) { resumeFlySoon(); return; }
-    painter.style = style;
-  }
   if (!painter.on) {
     painter.on = true;
     painter.yaw = 0;
@@ -3166,7 +3273,7 @@ function filterPainter() {
   const match = (text) => words.every((w) => text.toLowerCase().includes(w));
   const cur = painter.pieces[painter.at];
   const order = (o) => GROUP_ORDER.indexOf(pieceGroup(o));
-  painter.pieces = painter.all.filter((o) => (!painter.style || styleOf(o) === painter.style) && match(o.id + ' ' + (o.name || '')))
+  painter.pieces = painter.all.filter((o) => painter.style != null && (!painter.style || styleOf(o) === painter.style) && match(o.id + ' ' + (o.name || '')))
     .sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
   painter.at = Math.max(0, painter.pieces.indexOf(cur));
   $('rb-style-name').textContent = styleName(painter.style);
@@ -3221,7 +3328,11 @@ function filterPainter() {
     cell.addEventListener('click', () => pickPiece(i));
     painter.thumbObserver.observe(cell);
   });
-  if (!ready.length && !painter.pieces.length) box.innerHTML = '<div class="npc-hint rb-empty">Nothing matches.</div>';
+  if (painter.style == null) {
+    const hint = box.appendChild(document.createElement('div'));
+    hint.className = 'npc-hint rb-empty';
+    hint.textContent = 'Choose a style above to see its walls, floors and doors. Or start from a blueprint: click one, then click in the view.';
+  } else if (!ready.length && !painter.pieces.length) box.insertAdjacentHTML('beforeend', '<div class="npc-hint rb-empty">Nothing matches.</div>');
   const again = painter.set && ready.find((b) => b.name === painter.set.name);
   if (again) pickSet(again); else pickPiece(painter.at);
 }
@@ -3670,8 +3781,8 @@ function openMenuAt(x, y, own = null, before = []) {
           else item(`Can't attach: ${why}`, null);
         }
       }
-      if (!TOUCH && state.selection.some((o) => o.userData.ref.mesh)) {
-        item(state.selection.length > 1 ? `Save ${state.selection.length} as a blueprint…` : 'Save as a blueprint…', () => saveBlueprint());
+      if (!TOUCH && state.selection.filter((o) => o.visible && o.userData.ref.mesh).length > 1) {      // several, or a group
+        item(`Save ${state.selection.length} as a blueprint…`, () => saveBlueprint());
       }
       item('Focus selection', lookAtSelected);
     }
@@ -4006,6 +4117,7 @@ function pickAt(ndcX, ndcY, add = false, single = false) {
   const hits = raycaster.intersectObjects(world.children, true)
     .filter((x) => visibleChain(x.object) && !x.object.userData.water);
   const isStructure = (x) => refOf(x.object)?.userData.ref.structure;
+  if (!add && flagUnder(raycaster.ray, hits[0]?.distance)) { flagMenu(ndcX, ndcY); return; }
   let h = hits[0];
   if (h && locked && isStructure(h)) {
     h = hits.find((x) => !isStructure(x) && x.distance - hits[0].distance < 40);
@@ -4030,8 +4142,9 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
   down = { x: e.clientX, y: e.clientY, button: e.button, onGizmo: gizmo.axis !== null && !state.mouseLook };
-  if (painter.on && e.button === 0 && !state.mouseLook) { down = null; startStroke(e); return; }
+  if (painter.on && e.button === 0 && !state.mouseLook && !state.picking) { down = null; startStroke(e); return; }
   if (state.mouseLook) {
+    if (e.button === 0 && state.picking) { pickStartAt(0, 0); return; }
     if (e.button === 0 && state.placing) { placeAt(0, 0, e.shiftKey); return; }
     if (e.button === 0) pickAt(0, 0, e.metaKey || e.ctrlKey, e.altKey);
     if (e.button === 2) {
@@ -4062,7 +4175,8 @@ window.addEventListener('mouseup', (e) => {
   if (e.button === 0 && down && !down.onGizmo && !state.mouseLook && e.target === canvas
       && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) {
     const [nx, ny] = ndc(e.clientX, e.clientY);
-    if (state.placing) placeAt(nx, ny, e.shiftKey);
+    if (state.picking) pickStartAt(nx, ny);
+    else if (state.placing) placeAt(nx, ny, e.shiftKey);
     else pickAt(nx, ny, e.metaKey || e.ctrlKey || !!state.multiTouch, e.altKey);
   }
   down = null;
@@ -4140,6 +4254,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 'escape') { closePainter(); return; }
     if (k === '[' || k === ']') { pickPiece(painter.set ? 0 : painter.at + (k === '[' ? -1 : 1)); return; }
   }
+  if (state.picking && k === 'escape') { endPick(null); return; }
   // while placing: Z X turn it, C stands it on its next side (a book upright, a plate on its edge; Shift: the one before)
   if (state.placing?.preset?.o && (k === 'z' || k === 'x' || k === 'c')) {
     const t = state.placing.turn;
@@ -4975,21 +5090,52 @@ const recordsWin = setupRecords({
   goTo: (key, cell) => projectApi.goTo(key, cell),
 });
 // Test in game: the saved plugin, in OpenMW, in this cell
-$('play').addEventListener('click', async () => {
+$('play').addEventListener('click', async (e) => {
   if (!state.cell) return;
+  // where to start: asked the first time in a cell (and again with Shift), then remembered
+  let spot = e.shiftKey ? null : startSpot();
+  if (!spot) {
+    spot = await askStartSpot();
+    if (!spot) return;
+    keepStartSpot(spot);
+  }
   if (state.dirty && !await save()) return;
   $('play').disabled = true;
+  let started = false;
   try {
     const res = await fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                           body: JSON.stringify({ cell: state.cell.name }) });
+                                           body: JSON.stringify({ cell: state.cell.name, at: spot.at, yaw: spot.yaw }) });
     const out = await res.json();
-    status(out.ok ? `Starting OpenMW in ${state.cell.name}${out.added ? `, with ${out.plugin} loaded for this run` : ''}. It takes a moment.`
+    started = !!out.ok;
+    status(out.ok ? `Starting OpenMW in ${state.cell.name}, at the flag${out.added ? `, with ${out.plugin} loaded for this run` : ''}. It takes a moment.`
       : out.message, !out.ok);
   } catch (err) {
     status('The editor isn\'t responding.', true);
   }
-  setTimeout(() => { $('play').disabled = false; }, 4000);
+  if (started) watchGame(); else $('play').disabled = false;
 });
+
+// While the game the editor started is open, the button says so and can't start another.
+const playLabel = { text: null, timer: null };
+function showGameRunning(on) {
+  const b = $('play');
+  const node = [...b.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).pop();
+  if (!node) return;
+  if (playLabel.text == null) playLabel.text = node.textContent;
+  node.textContent = on ? 'Game running' : playLabel.text;
+  b.disabled = on;
+  b.classList.toggle('running', on);
+}
+function watchGame() {
+  showGameRunning(true);
+  clearInterval(playLabel.timer);
+  playLabel.timer = setInterval(async () => {
+    let running = false;
+    try { running = (await (await fetch('/api/play/running')).json()).running; } catch (err) { /* the editor stopped */ }
+    if (!running) { clearInterval(playLabel.timer); showGameRunning(false); }
+  }, 2000);
+}
+fetch('/api/play/running').then((r) => r.json()).then((o) => { if (o.running) watchGame(); }).catch(() => {});
 $('records').addEventListener('click', () => { if (document.pointerLockElement) pauseFly(); closeMenu(); recordsWin.open(); });
 
 // --- Project panel ---------------------------------------------------------------------

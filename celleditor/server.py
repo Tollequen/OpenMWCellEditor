@@ -786,9 +786,30 @@ def openmw_program():
     return next((p for p in found if p and os.path.exists(p)), None)
 
 
-def play(cell):
-    """Start OpenMW in a cell, past the menu, with the project's plugin loaded; ValueError says why it can't."""
+_game = None
+
+
+def game_running():
+    """Whether the game that Test in game started is still open."""
+    return _game is not None and _game.poll() is None
+
+
+def start_command(cell, at, yaw=0.0):
+    """The console command that puts the player at a position (heading in degrees) in a cell."""
+    x, y, z = (float(v) for v in at[:3])
+    if esp.parse_exterior(cell):
+        return "player->position %.1f %.1f %.1f %.1f" % (x, y, z, yaw)
+    return 'player->positioncell %.1f %.1f %.1f %.1f "%s"' % (x, y, z, yaw, cell.replace('"', ""))
+
+
+def play(cell, at=None, yaw=0.0):
+    """Start OpenMW in a cell, past the menu, with the project's plugin loaded; ValueError says why it can't.
+
+    at: where the player should stand. Without it OpenMW chooses: a door's arrival point, else some object's
+    place, which can be outside the room."""
     import subprocess
+    if game_running():
+        raise ValueError("The game is already running: close it to test again.")
     program = openmw_program()
     if not program:
         raise ValueError("OpenMW wasn't found on this computer. Start it yourself and load the plugin there.")
@@ -805,8 +826,15 @@ def play(cell):
         args += ["--content", plugin]
         if not any(same(d, folder) for d in cfg.get("data", [])):
             args += ["--data", folder]
-    subprocess.Popen(args, cwd=os.path.dirname(program), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    if at and len(at) >= 3:
+        script = os.path.join(models.cache_dir(), "test-in-game.txt")
+        os.makedirs(os.path.dirname(script), exist_ok=True)
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(start_command(cell, at, float(yaw or 0)) + "\n")
+        args += ["--script-run", script]
+    global _game
+    _game = subprocess.Popen(args, cwd=os.path.dirname(program), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
     return {"ok": True, "cell": cell, "plugin": plugin, "added": added}
 
 
@@ -1533,6 +1561,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.reply(json.dumps(cell_data(q["name"])).encode())
             if u.path == "/api/terrain":
                 return self.reply(json.dumps(terrain(int(q["x"]), int(q["y"]))).encode())
+            if u.path == "/api/play/running":
+                return self.reply(json.dumps({"running": game_running()}).encode())
             if u.path == "/api/light":
                 return self.reply(json.dumps(light_info(q["id"], mesh=q.get("mesh"))).encode())
             if u.path == "/api/history":
@@ -1613,7 +1643,7 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.reply(json.dumps({"ok": False, "message": "The game starts on the computer the "
                                                   "editor runs on: use that one."}).encode(), code=403)
                 try:
-                    return self.reply(json.dumps(play(body.get("cell") or "")).encode())
+                    return self.reply(json.dumps(play(body.get("cell") or "", body.get("at"), body.get("yaw") or 0)).encode())
                 except (ValueError, OSError) as e:
                     return self.reply(json.dumps({"ok": False, "message": str(e)}).encode(), code=400)
             if u.path == "/api/revert":
