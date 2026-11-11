@@ -342,6 +342,13 @@
   .rb-head h3 { flex: 1; margin: 0; }
   #rb-style { width: 100%; justify-content: flex-start; gap: 7px; background: var(--field); margin-bottom: 6px; }
   #rb-style-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  #rb-style-hint, #rb-style-or { display: none; font-size: 12px; line-height: 1.4; }
+  #rb-style-hint { margin-bottom: 8px; }
+  #rb-style-or { color: var(--dim); margin-bottom: 8px; }
+  .no-style #rb-style-hint, .no-style #rb-style-or { display: block; }
+  .no-style #rb-style { justify-content: center; padding: 12px; font-size: 14px; background: var(--accent); }
+  .no-style #rb-style-name { flex: none; }
+  .no-style #rb-style > :last-child { display: none; }
   #rb-search { width: 100%; box-sizing: border-box; }
   .rb-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .rb-controls .rb-h { margin-left: auto; display: flex; align-items: center; gap: 4px; }
@@ -804,8 +811,8 @@
     <dt>Click</dt><dd>Place the piece or blueprint</dd>
     <dt><kbd class="alt">Alt</kbd>+click</dt><dd>Remove a piece you added (drag for more)</dd>
     <dt><kbd>Z</kbd><kbd>X</kbd></dt><dd>Turn by a quarter</dd>
-    <dt><kbd>PgUp</kbd><kbd>PgDn</kbd></dt><dd>Raise, lower by 64</dd>
-    <dt><kbd>[</kbd><kbd>]</kbd></dt><dd>Previous, next piece</dd>
+    <dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>Raise, lower by 64</dd>
+    <dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Previous, next piece</dd>
     <dt>Right drag</dt><dd>Look around</dd>
     <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move; <kbd>Q</kbd> down, <kbd>E</kbd> up</dd>
     <dt><kbd class="mod">Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo</dd>
@@ -833,13 +840,15 @@
   <div id="rb-panel">
     <div class="psec rb-head"><h3>Room builder</h3><button id="rb-done" class="primary" title="Back to the editor (Escape)">Done</button></div>
     <div class="psec">
-      <button id="rb-style" title="Choose another style"><i data-icon="grid"></i><span id="rb-style-name"></span><i data-icon="chevDown"></i></button>
+      <div id="rb-style-hint">Start by choosing a theme (Hlaalu, Redoran, a cave…) to see its walls, floors and doors.</div>
+      <button id="rb-style" title="Choose another theme"><i data-icon="grid"></i><span id="rb-style-name"></span><i data-icon="chevDown"></i></button>
+      <div id="rb-style-or">Or start from a blueprint below: click one, then click in the view.</div>
       <input id="rb-search" type="search" placeholder="Filter the pieces and blueprints" autocomplete="off">
     </div>
     <div class="psec rb-controls">
       <button id="rb-left" class="icon" title="Turn left (Z)"><i data-icon="rotate"></i></button>
       <button id="rb-right" class="icon" title="Turn right (X)"><i data-icon="rotate"></i></button>
-      <span class="rb-h"><button id="rb-down" title="Lower by 64 (Page Down)">Lower</button><span id="rb-level" title="The height pieces stand on">0</span><button id="rb-up" title="Raise by 64 (Page Up)">Raise</button></span>
+      <span class="rb-h"><button id="rb-down" title="Lower by 64 (Down arrow)">Lower</button><span id="rb-level" title="The height pieces stand on">0</span><button id="rb-up" title="Raise by 64 (Up arrow)">Raise</button></span>
       <div id="rb-info"></div>
     </div>
     <div id="rb-groups"></div>

@@ -3079,8 +3079,8 @@ $('place-cancel').addEventListener('click', () => { stopPlacing(); endPick(null)
 // --- Room builder -----------------------------------------------------------
 // A mode for building rooms: the panel shows a style's room pieces by what they're for (the server finds the
 // pieces by how the game places them, pieces.py) and the room blueprints; each click puts the
-// chosen piece or blueprint on the grid square under the pointer (anywhere with snap to grid off). Z and X turn it by quarter turns, Page Up and Page
-// Down change the height by 64, [ and ] pick the next piece, Alt+click removes a piece added here.
+// chosen piece or blueprint on the grid square under the pointer (anywhere with snap to grid off). Z and X turn it by quarter turns, the up and
+// down arrows change the height by 64, the left and right arrows pick the next piece, Alt+click removes a piece added here.
 
 const painter = { on: false, style: null, all: [], pieces: [], at: 0, set: null, sets: [], ready: [], yaw: 0, level: 0,
                   ghost: null, ghostKey: '', square: null, stroke: null, point: null, token: 0,
@@ -3113,7 +3113,7 @@ function styleOf(o) {
   return `${m[1]}_${STYLE_ALIASES[k] || k}`;
 }
 function styleName(key) {
-  if (key == null) return 'Choose a style…';
+  if (key == null) return 'Choose theme';
   if (!key) return 'All room pieces';
   const [side, k] = [key.slice(0, 2), key.slice(3)];
   return STYLE_NAMES[k] ? STYLE_NAMES[k] + (side === 'ex' ? ' (outside)' : '') : key;
@@ -3202,7 +3202,7 @@ async function chooseStyle() {
   const shows = (list) => [/room.*corner/, /hall|corr/, /room|corner|side/, /wall|_w_/]
     .map((re) => list.find((o) => re.test(o.id) && plain(o))).find(Boolean) || list.find(plain) || list[0];
   return choose({
-    title: 'Room builder: choose a style', none: 'All room pieces', current: painter.style || '', views: false,
+    title: 'Room builder: choose a theme', none: 'All room pieces', current: painter.style || '', views: false,
     items: [...styles].filter(([, list]) => list.length >= 6).map(([k, list]) => ({
       id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${list.length} pieces`,
       thumb: () => thumbPicture(shows(list).mesh) })) });
@@ -3289,6 +3289,9 @@ function filterPainter() {
     .sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
   painter.at = Math.max(0, painter.pieces.indexOf(cur));
   $('rb-style-name').textContent = styleName(painter.style);
+  $('rb-panel').classList.toggle('no-style', painter.style == null);
+  $('rb-style').classList.toggle('primary', painter.style == null);
+  $('rb-style').title = painter.style == null ? 'Choose the theme to build with' : 'Choose another theme';
   const box = $('rb-groups');
   box.innerHTML = '';
   painter.thumbObserver?.disconnect();
@@ -3340,11 +3343,7 @@ function filterPainter() {
     cell.addEventListener('click', () => pickPiece(i));
     painter.thumbObserver.observe(cell);
   });
-  if (painter.style == null) {
-    const hint = box.appendChild(document.createElement('div'));
-    hint.className = 'npc-hint rb-empty';
-    hint.textContent = 'Choose a style above to see its walls, floors and doors. Or start from a blueprint: click one, then click in the view.';
-  } else if (!ready.length && !painter.pieces.length) box.insertAdjacentHTML('beforeend', '<div class="npc-hint rb-empty">Nothing matches.</div>');
+  if (painter.style != null && !ready.length && !painter.pieces.length) box.insertAdjacentHTML('beforeend', '<div class="npc-hint rb-empty">Nothing matches.</div>');
   const again = painter.set && ready.find((b) => b.name === painter.set.name);
   if (again) pickSet(again); else pickPiece(painter.at);
 }
@@ -4256,9 +4255,11 @@ window.addEventListener('keydown', (e) => {
   if (painter.on) {
     if (e.key === 'Alt') { setErasing(true); return; }
     if (k === 'z' || k === 'x') { paintTurn(k === 'z' ? -1 : 1); return; }
-    if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); paintLevel(e.key === 'PageUp' ? 1 : -1); return; }
+    const up = { ArrowUp: 1, PageUp: 1, ArrowDown: -1, PageDown: -1 }[e.key];
+    if (up) { e.preventDefault(); paintLevel(up); return; }
     if (k === 'escape') { closePainter(); return; }
-    if (k === '[' || k === ']') { pickPiece(painter.set ? 0 : painter.at + (k === '[' ? -1 : 1)); return; }
+    const next = { ArrowRight: 1, ']': 1, ArrowLeft: -1, '[': -1 }[e.key];
+    if (next) { e.preventDefault(); pickPiece(painter.set ? 0 : painter.at + next); return; }
   }
   if (state.picking && k === 'escape') { endPick(null); return; }
   // while placing: Z X turn it, C stands it on its next side (a book upright, a plate on its edge; Shift: the one before)
@@ -5657,7 +5658,7 @@ function updateHints() {
   if (!bar) return;
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
   const mod = mac ? 'Cmd' : 'Ctrl', alt = mac ? 'Option' : 'Alt';
-  const isKey = (x) => /^([A-Z?]|Esc|Tab|Del|Cmd|Ctrl|Shift|PgUp|PgDn)$/.test(x);
+  const isKey = (x) => /^([A-Z?]|Esc|Tab|Del|Cmd|Ctrl|Shift|[←→↑↓])$/.test(x);
   const n = state.selection.length;
   const [what, hints] = $('place-banner').classList.contains('open') ? ['Placing', [['Click', 'put it there'], ['Z X', 'turn'], ['C', 'flip'], ['Right-drag', 'look around'], ['Esc', 'cancel']]]
     : $('dest-banner').classList.contains('open') ? ['Door destination', [['W A S D', 'fly to where the player arrives'], ['Right-drag', 'face the way they should']]]
@@ -5665,7 +5666,7 @@ function updateHints() {
       ['Click', 'select at the crosshair'], ['Right-click', 'menu'], ['Arrows', 'move the object'], ['Z X', 'rotate'], ['G', 'drop'],
       ['B', 'attach'], ['Del', 'delete'], [mod + ' Z', 'undo'], ['Tab', 'leave fly mode']]]
     : document.body.classList.contains('building') ? ['Room builder', [['Click', 'place'], [alt + ' click', 'remove a piece'],
-      ['Z X', 'turn'], ['PgUp PgDn', 'raise, lower'], ['[ ]', 'next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
+      ['Z X', 'turn'], ['↑ ↓', 'raise, lower'], ['← →', 'previous, next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
       [mod + ' Z', 'undo'], ['Esc', 'done']]]
     : n ? [n > 1 ? `${n} selected` : 'Selected', [['Drag the arrows', 'move'], ['T R Y', 'move, rotate, scale'], ['G', 'drop onto the surface'],
       ['B', 'attach'], [mod + ' D', 'duplicate'], ...(n > 1 ? [[mod + ' G', 'group']] : [[mod + ' click', 'select more']]), ['Del', 'delete'],
