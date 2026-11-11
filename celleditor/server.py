@@ -859,8 +859,8 @@ _room_sets = []
 
 
 def room_sets(sets=None):
-    """The user's blueprints (for every project), saved again when given: [{name, room, pieces: [{id, pos, rz, rot,
-    scale}]}] (room: it snaps to the grid and shows in the room builder; rot: all three angles of a tilted object)."""
+    """The user's blueprints (for every project), saved again when given: [{name, pieces: [{id, pos, rz, rot,
+    scale}]}] (rot: all three angles of a tilted object)."""
     global _room_sets
     if sets is not None:
         clean = []
@@ -876,7 +876,7 @@ def room_sets(sets=None):
                     q["scale"] = round(float(p["scale"]), 3)
                 pieces.append(q)
             if str(s.get("name") or "").strip() and pieces:
-                clean.append({"name": str(s["name"]).strip()[:60], "room": bool(s.get("room", True)), "pieces": pieces})
+                clean.append({"name": str(s["name"]).strip()[:60], "pieces": pieces})
         if SETTINGS:
             SETTINGS.set("room_sets", clean)
         _room_sets = clean

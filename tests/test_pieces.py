@@ -53,9 +53,9 @@ class RoomSets(unittest.TestCase):
                                     {"name": "", "pieces": [{"id": "a", "pos": [0, 0, 0]}]},
                                     {"name": "Table", "room": False, "pieces": [
                                         {"id": "plate", "pos": [0, 0, 30], "rot": [0.1, 0, 2], "scale": 1.5}]}])
-            self.assertEqual(got, [{"name": "Chapel", "room": True,
+            self.assertEqual(got, [{"name": "Chapel",
                                     "pieces": [{"id": "in_x_room_corner", "pos": [1.23, 2.0, 3.0], "rz": 1.5708}]},
-                                   {"name": "Table", "room": False, "pieces": [
+                                   {"name": "Table", "pieces": [
                                        {"id": "plate", "pos": [0.0, 0.0, 30.0], "rz": 0.0, "rot": [0.1, 0.0, 2.0], "scale": 1.5}]}])
             self.assertEqual(server.room_sets(), got)
         finally:

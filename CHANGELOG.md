@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.5.0
+## 0.5.1
 
 **New**
 - Test in game: one click saves and starts OpenMW in the cell you are editing, standing where you choose.
 - New desktop layout: toolbar, left panel, inspector and key hints.
 - Room builder with ready-made blueprints (house, tavern, chapel, hut).
-- Your own blueprints: save a selection or a whole cell, place it anywhere.
+- Your own blueprints: save a selection or a whole cell, place it anywhere, in the room builder too.
 - Add many: keep placing an object, with a see-through preview.
 - Create potions, ingredients, lights, statics, activators, doors and containers.
 - Edit enchantments and spells.

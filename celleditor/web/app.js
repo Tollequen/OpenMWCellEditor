@@ -2254,27 +2254,9 @@ function pickerRow(o, i) {
     st.addEventListener('click', async (e) => { e.stopPropagation(); await picker.star.toggle(o); paint(); paintPreviewStar(); });
     row.appendChild(st);
   }
-  if (o.blueprint && !o.blueprint.ready) {                 // one of the user's: is it a room, and delete
+  if (o.blueprint && !o.blueprint.ready) {                 // one of the user's can be deleted
     const b = o.blueprint;
     const change = async (fn) => { painter.sets = await roomSets(fn(await roomSets())); };
-    const room = document.createElement('span');
-    const paint = () => {
-      room.className = 'star bp-room' + (b.room ? ' on' : '');
-      room.innerHTML = icon(b.room ? 'homeFilled' : 'home');
-      room.title = b.room ? 'A room: it snaps to the grid, and is in the room builder as well. Click to make it furniture.'
-        : 'Furniture: placed freely, not in the room builder. Click to make it a room.';
-    };
-    paint();
-    room.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      b.room = !b.room;
-      paint();
-      status(b.room ? `${b.name} is now a room: it snaps to the grid, and is in the room builder as well.`
-        : `${b.name} is now furniture: it's placed freely, and no longer in the room builder.`);
-      await change((sets) => sets.map((x) => (x.name === b.name ? { ...x, room: b.room } : x)));
-      preview.shown = null;
-      showPreview(o);
-    });
     const del = document.createElement('span');
     del.className = 'star bp-del';
     del.title = 'Delete this blueprint';
@@ -2287,7 +2269,7 @@ function pickerRow(o, i) {
       filterPicker();
       status(`Deleted the blueprint ${b.name}.`);
     });
-    row.append(room, del);
+    row.append(del);
   }
   row.addEventListener('click', (e) => {
     if (TOUCH && picker.sel !== i && previewShown()) { highlight(i); return; }
@@ -2686,7 +2668,7 @@ async function showPreview(o) {
   $('pk-pv-name').textContent = o.name || o.id;
   const from = o.file && o.file.toLowerCase() !== 'morrowind.esm' ? ` · ${o.file}` : '';
   const bp = o.blueprint;
-  $('pk-pv-id').textContent = bp ? `Blueprint · ${bp.items.length} objects · ${bp.room ? 'a room' : 'furniture'}${bp.ready ? '' : ' · yours'}`
+  $('pk-pv-id').textContent = bp ? `Blueprint · ${bp.items.length} objects${bp.ready ? '' : ' · yours'}`
     : (o.name ? `${o.id} · ${o.type}` : `${o.cat || o.type} · ${o.type}`) + from;
   paintPreviewStar();
   const token = ++preview.token;
@@ -3154,7 +3136,8 @@ async function loadPieces() {
 }
 
 // The blueprints: the editor's own rooms (rooms.js) and the user's, as [{name, room, ready, style, items}] with
-// items [{o: the catalogue's object, rel, rot, scale}]. One of the editor's is left out when the load order lacks a
+// items [{o: the catalogue's object, rel, rot, scale}]. There is one kind of blueprint; `room` (most of it is
+// walls and floors) only says whose snap setting applies and that it turns by quarters, as for single objects. One of the editor's is left out when the load order lacks a
 // piece of it; a user's keeps the objects that are there.
 function blueprintsOf(catalog, sets) {
   const byId = new Map(catalog.map((o) => [o.id.toLowerCase(), o]));
@@ -3165,7 +3148,8 @@ function blueprintsOf(catalog, sets) {
     const items = b.pieces.map((p) => ({ o: byId.get(p.id.toLowerCase()), rel: p.pos, rot: p.rot || [0, 0, p.rz || 0], scale: p.scale || 1 }))
       .filter((it) => it.o && it.o.mesh);
     return items.length && !(b.ready && items.length < b.pieces.length)
-      ? { name: b.name, style: b.style || null, ready: !!b.ready, room: b.room !== false, items } : null;
+      ? { name: b.name, style: b.style || null, ready: !!b.ready,
+          room: !!b.ready || items.filter((it) => isPiece(it.o.mesh)).length * 2 > items.length, items } : null;
   }).filter(Boolean);
 }
 // as the Add object window lists them
@@ -3296,8 +3280,8 @@ function filterPainter() {
     d.querySelector('summary').textContent = `${title} (${count})`;
     return d.querySelector('.rb-grid');
   };
-  // the room blueprints: the editor's of every style (the chosen one's first), then the user's
-  painter.ready = blueprintsOf(catalogData || painter.all, painter.sets).filter((b) => b.room);
+  // every blueprint: the editor's of every style (the chosen one's first), then the user's
+  painter.ready = blueprintsOf(catalogData || painter.all, painter.sets);
   const ready = painter.ready.filter((s) => match(s.name))
     .sort((a, b) => (b.ready - a.ready) || (b.style === painter.style) - (a.style === painter.style));
   for (const [title, list] of [['Blueprints', ready]]) {
@@ -3538,21 +3522,15 @@ function paintLevel(sign) {
   levelGrid(true);
 }
 
-// Save as a blueprint: the objects relative to the middle of their footing (the grid square there for a room) and
-// the height they stand on. A room snaps to the grid and shows in the room builder: guessed from the objects (most
-// are room pieces), and the checkbox says otherwise.
+// Save as a blueprint: the objects relative to the middle of their footing and the height they stand on. When
+// most of them are room pieces the middle is a grid square's, so the rooms it makes stand on the grid.
 async function saveBlueprint(objs = state.selection, suggest = '') {
   objs = objs.filter((o) => o.visible && o.userData.ref.mesh && o.userData.ref.kind === 'mesh');
   if (!objs.length) { status('Nothing here to save as a blueprint.', true); return; }
-  let known = new Set();
-  try { known = await roomPieceIds(); } catch (err) { /* guessed from the models' folders */ }
-  const isRoom = (r) => (known.size ? known.has(r.src.toLowerCase()) : isPiece(r.mesh));
-  const guess = objs.filter((o) => isRoom(o.userData.ref)).length * 2 > objs.length;
-  const got = await askText(objs.length > 1 ? `Save ${objs.length} objects as a blueprint` : 'Save as a blueprint',
-                            'A name, e.g. Table with plates', suggest || (objs.length === 1 ? objs[0].userData.ref.src : ''),
-                            { label: 'This is a room: it snaps to the grid, and is in the room builder as well', on: guess });
-  if (!got) return;
-  const { text: name, on: room } = got;
+  const room = objs.filter((o) => isPiece(o.userData.ref.mesh)).length * 2 > objs.length;
+  const name = await askText(objs.length > 1 ? `Save ${objs.length} objects as a blueprint` : 'Save as a blueprint',
+                             'A name, e.g. Table with plates', suggest || (objs.length === 1 ? objs[0].userData.ref.src : ''));
+  if (!name) return;
   const box = boxOf(objs);
   const c = box.getCenter(new THREE.Vector3());
   const ox = room ? toStep(c.x, grid.step) : Math.round(c.x), oy = room ? toStep(c.y, grid.step) : Math.round(c.y);
@@ -3565,8 +3543,8 @@ async function saveBlueprint(objs = state.selection, suggest = '') {
              ...(Math.abs((r.scale || 1) - 1) > 1e-3 ? { scale: r.scale } : {}) };
   });
   const sets = (await roomSets()).filter((s) => s.name !== name);
-  painter.sets = await roomSets([...sets, { name, room, pieces }].sort((a, b) => a.name.localeCompare(b.name)));
-  status(`Saved the blueprint ${name} (${pieces.length} objects): it's under Blueprints in Add object…${room ? ', and in the room builder as well' : ''}.`);
+  painter.sets = await roomSets([...sets, { name, pieces }].sort((a, b) => a.name.localeCompare(b.name)));
+  status(`Saved the blueprint ${name} (${pieces.length} objects): it's under Blueprints in Add object… and in the room builder.`);
   if (painter.on) filterPainter();
 }
 
