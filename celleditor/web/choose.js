@@ -16,26 +16,27 @@ const el = (tag, cls, text) => {
 };
 
 let iconWatch = null;
-function iconEl(name) {
-  const img = el('img', 'ic');
+function iconEl(name, thumb = null) {
+  const img = el('img', thumb ? 'ic big' : 'ic');
   img.alt = '';
-  if (!name || !iconOf) return img;
+  if (thumb) img.thumb = thumb;
+  else if (!name || !iconOf) return img;
   iconWatch = iconWatch || new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
       iconWatch.unobserve(e.target);
-      iconOf(e.target.dataset.icon).then((url) => { if (url) e.target.src = url; });
+      (e.target.thumb ? e.target.thumb() : iconOf(e.target.dataset.icon)).then((url) => { if (url) e.target.src = url; });
     }
   }, { rootMargin: '200px' });
-  img.dataset.icon = name;
+  if (name) img.dataset.icon = name;
   iconWatch.observe(img);
   return img;
 }
 
-// items: [{id, name, type, icon, note, detail}] (detail: lines shown beside the list for the one picked); resolves to the id picked, '' for none, or null when cancelled
-export function choose({ title, items, current = '', none = null, type = '' }) {
+// items: [{id, name, type, icon, thumb, note, detail}] (thumb: () => a picture's URL, shown larger than an icon; views: false leaves out the list / icons switch; detail: lines shown beside the list for the one picked); resolves to the id picked, '' for none, or null when cancelled
+export function choose({ title, items, current = '', none = null, type = '', views = true }) {
   return new Promise((resolve) => {
-    const icons = items.some((o) => o.icon);
+    const icons = items.some((o) => o.icon || o.thumb);
     const types = [...new Set(items.map((o) => o.type).filter(Boolean))].sort();
     const bg = el('div', 'dialog-bg');
     bg.innerHTML = `<div class="dialog choose-dialog"><h3></h3>
@@ -63,11 +64,11 @@ export function choose({ title, items, current = '', none = null, type = '' }) {
     for (const t of types) filter.add(new Option(t, t));
     filter.value = types.includes(type) ? type : '';
     filter.style.display = types.length > 1 ? '' : 'none';
-    q('.wr-views').style.display = icons ? '' : 'none';
+    q('.wr-views').style.display = icons && views ? '' : 'none';
     q('.ch-none').textContent = none || '';
     q('.ch-none').style.display = none ? '' : 'none';
     const view = { rows: [], sel: -1, grid: false };
-    try { view.grid = icons && localStorage.getItem('ce-choose-view') === 'grid'; } catch (err) { /* private mode */ }
+    try { view.grid = icons && views && localStorage.getItem('ce-choose-view') === 'grid'; } catch (err) { /* private mode */ }
     const showView = () => {
       list.classList.toggle('grid', view.grid);
       q('.ch-as-list').classList.toggle('on', !view.grid);
@@ -101,7 +102,7 @@ export function choose({ title, items, current = '', none = null, type = '' }) {
       list.innerHTML = '';
       view.rows.forEach((o, i) => {
         const row = list.appendChild(el('div', 'wr-row'));
-        if (icons) row.appendChild(iconEl(o.icon));
+        if (icons) row.appendChild(iconEl(o.icon, o.thumb));
         const about = [o.name && o.name !== o.id ? o.id : '', o.type, o.note].filter(Boolean).join(' · ');
         const t = row.appendChild(el('div', 't'));
         t.appendChild(el('div', 'n', o.name || o.id));

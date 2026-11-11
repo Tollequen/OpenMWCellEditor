@@ -42,8 +42,13 @@ class RoomSets(unittest.TestCase):
         try:
             got = server.room_sets([{"name": " Chapel ", "pieces": [{"id": "in_x_room_corner", "pos": [1.234, 2, 3], "rz": 1.5707964},
                                                                     {"id": "", "pos": [0, 0, 0]}]},
-                                    {"name": "", "pieces": [{"id": "a", "pos": [0, 0, 0]}]}])
-            self.assertEqual(got, [{"name": "Chapel", "pieces": [{"id": "in_x_room_corner", "pos": [1.23, 2.0, 3.0], "rz": 1.5708}]}])
+                                    {"name": "", "pieces": [{"id": "a", "pos": [0, 0, 0]}]},
+                                    {"name": "Table", "room": False, "pieces": [
+                                        {"id": "plate", "pos": [0, 0, 30], "rot": [0.1, 0, 2], "scale": 1.5}]}])
+            self.assertEqual(got, [{"name": "Chapel", "room": True,
+                                    "pieces": [{"id": "in_x_room_corner", "pos": [1.23, 2.0, 3.0], "rz": 1.5708}]},
+                                   {"name": "Table", "room": False, "pieces": [
+                                       {"id": "plate", "pos": [0.0, 0.0, 30.0], "rz": 0.0, "rot": [0.1, 0.0, 2.0], "scale": 1.5}]}])
             self.assertEqual(server.room_sets(), got)
         finally:
             server.SETTINGS = old

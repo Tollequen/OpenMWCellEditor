@@ -31,9 +31,15 @@ body.studio.mouse-look #show-panel, body.studio.mouse-look #topbar { display: no
 #topbar #others { margin: 0; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 body.studio #n-modes { grid-column: 1 / -1; margin: 0; }
 body.studio #sel-edit #n-modes button { justify-content: center; height: 30px; }
-body.studio #qa-snaps { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0; border: none; }
-body.studio #qa-snaps button { color: var(--dim); justify-content: center !important; }
+#snapbox { position: fixed; left: calc(var(--vl) + 10px); top: calc(var(--vt) + 10px); z-index: 3; display: none; padding: 6px;
+           background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 10px rgba(0, 0, 0, .35); }
+body.studio:is(.has-sel, .placing, .building) #snapbox { display: block; }
+body.studio.mouse-look #snapbox, body.studio:has(#dest-banner.open) #snapbox { display: none; }
+body.studio #qa-snaps { display: flex !important; flex-direction: column; gap: 4px; padding: 0; border: none; }
+body.studio #qa-snaps button { color: var(--dim); justify-content: flex-start !important; }
+body.studio #qa-snaps button::after { content: 'Off'; margin-left: auto; padding-left: 14px; font-size: 11px; }
 body.studio #qa-snaps button.on { color: var(--text); }
+body.studio #qa-snaps button.on::after { content: 'On'; color: var(--accent); }
 #topbar #mouselook { position: static; background: var(--panel); }
 body.studio #save { padding: 4px 16px 4px 12px; font-weight: 600; }
 @media (max-width: 1240px) {
@@ -107,3 +113,4 @@ body.studio.hints #hintbar { padding-right: 46px; }
 #tb-keys { position: fixed; right: 8px; bottom: 4px; z-index: 4; width: 30px; height: 24px; padding: 2px; background: var(--float); }
 body.studio.mouse-look #tb-keys, body.studio.pad #tb-keys { display: none; }
 body.touch #paint-rooms { display: none; }
+body.studio.placing #inspector { display: none !important; }        /* what's being placed isn't the selection */

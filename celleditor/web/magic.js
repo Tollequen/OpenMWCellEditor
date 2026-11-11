@@ -8,7 +8,7 @@ const lineCache = new Map();          // id (lower case): effect lines of a new 
 
 export function setupMagic(a) {
   api = a;
-  return { create, edit, newEnchants, newSpells, refresh };
+  return { create, edit, newEnchants, newSpells, enchants, spells, lines: (id) => lineCache.get(id.toLowerCase()) || [], refresh };
 }
 
 const el = (tag, cls, text) => {
@@ -34,23 +34,29 @@ function loadInfo() {
   return info;
 }
 
-const mine = (kind) => Object.values(api.state.edits.magic || {}).filter((m) => m.new && m.kind === kind);
+const own = (kind, fresh) => Object.values(api.state.edits.magic || {}).filter((m) => m.kind === kind && (fresh == null || !!m.new === fresh));
+const mine = (kind) => own(kind, true);
 
-// the new ones as the pickers list them (lines: the effects, once refresh has them)
-function newEnchants() {
-  return mine('ENCH').map((m) => ({ id: m.id, type: ENCHANT_TYPES[m.type] || '?', effects: lineCache.get(m.id.toLowerCase()) || [],
-                                     ...(m.auto || m.type === 0 || m.type === 3 ? {} : { charge: m.charge }), mine: true }));
+// as the pickers list them (lines: the effects, once refresh has them)
+const asEnchant = (m) => ({ id: m.id, type: ENCHANT_TYPES[m.type] || '?', effects: lineCache.get(m.id.toLowerCase()) || [],
+                            ...(m.auto || m.type === 0 || m.type === 3 ? {} : { charge: m.charge }), mine: true });
+const asSpell = (m) => ({ id: m.id, name: m.name, type: SPELL_TYPES[m.type] || '?', mine: true,
+                          note: (lineCache.get(m.id.toLowerCase()) || []).join(', ') });
+function newEnchants() { return mine('ENCH').map(asEnchant); }
+function newSpells() { return mine('SPEL').map(asSpell); }
+// the game's list with the project's: new ones first, changed ones in the game's place
+function merged(kind, as, list) {
+  const changed = new Map(own(kind, false).map((m) => [m.id.toLowerCase(), as(m)]));
+  return [...mine(kind).map(as), ...(list || []).map((o) => changed.get(o.id.toLowerCase()) || o)];
 }
-function newSpells() {
-  return mine('SPEL').map((m) => ({ id: m.id, name: m.name, type: SPELL_TYPES[m.type] || '?', mine: true,
-                                    note: (lineCache.get(m.id.toLowerCase()) || []).join(', ') }));
-}
+const enchants = (list) => merged('ENCH', asEnchant, list);
+const spells = (list) => merged('SPEL', asSpell, list);
 const ENCHANT_TYPES = ['Cast once', 'Cast when strikes', 'Cast when used', 'Constant effect'];
 const SPELL_TYPES = ['Spell', 'Ability', 'Blight', 'Disease', 'Curse', 'Power'];
 
-// the effect lines of every new one
+// the effect lines of every new or changed one
 async function refresh() {
-  await Promise.all([...mine('ENCH'), ...mine('SPEL')].map(async (m) => {
+  await Promise.all([...own('ENCH'), ...own('SPEL')].map(async (m) => {
     try { lineCache.set(m.id.toLowerCase(), await post('/api/magic/lines', { kind: m.kind, type: m.type, effects: m.effects })); }
     catch (err) { /* shown without effects */ }
   }));
@@ -133,8 +139,8 @@ async function open({ kind, type = 0, name = '' }, old) {
       tl.appendChild(withChooser(t, (cur) => choose({
         title: `Choose ${kind === 'ENCH' ? 'an enchantment' : 'a spell'} to start from`, current: cur, none: 'No template',
         items: kind === 'ENCH'
-          ? [...newEnchants(), ...all.enchants].map((e) => ({ id: e.id, type: e.type, note: (e.effects || []).join(', ') }))
-          : [...newSpells(), ...all.spells].map((s) => ({ id: s.id, name: s.name, type: s.type })) }), useTemplate));
+          ? enchants(all.enchants).map((e) => ({ id: e.id, type: e.type, note: (e.effects || []).join(', ') }))
+          : spells(all.spells).map((s) => ({ id: s.id, name: s.name, type: s.type })) }), useTemplate));
       if (kind === 'SPEL') {
         const n = row('Name', el('input'));
         n.type = 'text';

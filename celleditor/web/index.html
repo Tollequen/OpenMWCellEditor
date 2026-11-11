@@ -287,6 +287,9 @@
   .pk-cell .star { position: absolute; top: 7px; right: 7px; color: #c8c8d0; display: inline-flex; opacity: 0; }
   .pk-cell:hover .star, .pk-cell.sel .star, .pk-cell .star.on, body.touch .pk-cell .star { opacity: 1; }
   .pk-cell .star.on { color: var(--warn); }
+  .pk-item .star.bp-room.on, .pk-cell .star.bp-room.on { color: var(--accent); }
+  .pk-cell .star.bp-room { right: 29px; }
+  .pk-cell .star.bp-del { right: 51px; }
   .pk-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .pk-row label { display: flex; align-items: center; gap: 8px; }
   #picker details.fold { border: 1px solid var(--line-soft); border-radius: var(--radius); }
@@ -604,6 +607,8 @@
   .wr-list.grid .wr-row { flex-direction: column; gap: 4px; padding: 6px 4px; border: 1px solid transparent; border-radius: 4px; text-align: center; }
   .wr-list.grid .wr-row.sel { border-color: var(--accent); }
   .wr-list.grid .ic { width: 48px; height: 48px; }
+  img.ic.big { width: 64px; height: 64px; }
+  .wr-list.grid .ic.big { width: 96px; height: 96px; }
   .wr-list.grid .n { font-size: 11px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .wr-list.grid .d { display: none; }
   .wr-row { border-left: 3px solid transparent; }
@@ -790,11 +795,11 @@
 <div id="rb-float" aria-label="Room builder keys">
   <div class="lk-title">Room builder <span><kbd>Esc</kbd> when done</span></div>
   <dl>
-    <dt>Click, drag</dt><dd>Place the piece or set</dd>
-    <dt><kbd class="alt">Alt</kbd>+click</dt><dd>Take away a piece you added (drag for more)</dd>
+    <dt>Click</dt><dd>Place the piece or blueprint</dd>
+    <dt><kbd class="alt">Alt</kbd>+click</dt><dd>Remove a piece you added (drag for more)</dd>
     <dt><kbd>Z</kbd><kbd>X</kbd></dt><dd>Turn by a quarter</dd>
     <dt><kbd>PgUp</kbd><kbd>PgDn</kbd></dt><dd>Raise, lower by 64</dd>
-    <dt>Wheel, <kbd>[</kbd><kbd>]</kbd></dt><dd>Next piece; <kbd>Shift</kbd>+wheel moves</dd>
+    <dt><kbd>[</kbd><kbd>]</kbd></dt><dd>Previous, next piece</dd>
     <dt>Right drag</dt><dd>Look around</dd>
     <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move; <kbd>Q</kbd> down, <kbd>E</kbd> up</dd>
     <dt><kbd class="mod">Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo</dd>
@@ -896,6 +901,7 @@
         <button id="duplicate" title="A copy beside it (Cmd/Ctrl+D)">Duplicate</button>
       </div>
       <div class="pair one"><button id="swap" title="Swap the selected object with a different model, keeping its place">Swap model…</button></div>
+      <div class="pair one"><button id="blueprint" title="Save the selected objects together, to place them again from Add object… &gt; Blueprints" style="display:none">Save as blueprint…</button></div>
       <div class="pair">
         <button id="reset" title="Back to original values">Reset</button>
         <button id="delete" title="Delete"><i data-icon="trash"></i>Delete</button>
@@ -998,6 +1004,7 @@
       <span id="pk-views" class="pk-views"><button id="pk-view-list" class="icon" title="Show as a list"><i data-icon="list"></i></button><button id="pk-view-grid" class="icon" title="Show the models"><i data-icon="grid"></i></button></span>
     </div>
     <label id="pk-attach-row" class="check" style="display:none"><input type="checkbox" id="pk-attach" checked> <span id="pk-attach-label">Attach to the object below</span></label>
+    <label id="pk-many-row" class="check" style="display:none" title="Off: the object is placed once. Shift+click on an object does the same for that one."><input type="checkbox" id="pk-many"> Add many: keep placing it with each click, until Esc</label>
     <label id="pk-group-row" class="check" style="display:none"><input type="checkbox" id="pk-group" checked> <span id="pk-group-label">Add to the group</span></label>
     <div id="pk-count"></div>
     <div id="pk-main">

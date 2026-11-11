@@ -12,6 +12,7 @@ import { setupContents } from './contents.js';
 import { setupItems } from './items.js';
 import { setupCells } from './cells.js';
 import { setupMagic } from './magic.js';
+import { ROOMS } from './rooms.js';
 import { setupChoose, choose, withChooser } from './choose.js';
 import { setupGamepad } from './gamepad.js';
 import { setupRecords } from './records.js';
@@ -142,7 +143,7 @@ function setGizmoMode(mode) {
 function updateSnap() {
   const on = $('snap').checked;
   const snapping = gridSnap();
-  const pieces = snapping && selKind() === 'pieces';
+  const pieces = snapping && !grid.mode && selKind() === 'pieces';
   gizmo.setTranslationSnap(on && !snapping ? state.moveStep : null);
   gizmo.setRotationSnap(pieces ? Math.PI / 2 : on ? state.rotStep * DEG : null);
   paintGrid();
@@ -155,15 +156,18 @@ function updateSnap() {
 
 const GRID_STEPS = [64, 128, 256];
 const GRID_Z = 64;
-// snap to grid is remembered apart for room pieces and for other objects (off for both at first)
+// snap to grid is remembered apart for room pieces and for other objects (off for both at first), and apart again in the room builder (on at first). mode: whose setting the switch
+// shows now ('builder', or 'pieces' / 'other' for what is being placed); null: the selection's
 const grid = { on: stored('ce-grid') === '1', pieces: stored('ce-grid-snap-pieces') === '1',
-               other: stored('ce-grid-snap-other') === '1',
+               other: stored('ce-grid-snap-other') === '1', builder: stored('ce-grid-snap-builder') !== '0', mode: null,
                step: GRID_STEPS.includes(+stored('ce-grid-step')) ? +stored('ce-grid-step') : 128, lines: null, z: 0 };
 const isPiece = (mesh) => !!mesh && /(^|[\\/])[ixd][\\/]/i.test(mesh);
 const toStep = (v, s) => Math.round(v / s) * s;
 // which setting the selection follows: room pieces' if it's all room pieces
 const selKind = () => (roots().length && roots().every((o) => isPiece(o.userData.ref.mesh)) ? 'pieces' : 'other');
-const gridSnap = (mesh) => grid[mesh === undefined ? selKind() : isPiece(mesh) ? 'pieces' : 'other'];
+const snapKind = () => grid.mode || selKind();
+const gridSnap = (mesh) => grid[mesh === undefined ? snapKind() : isPiece(mesh) ? 'pieces' : 'other'];
+function setSnapMode(mode) { grid.mode = mode; updateSnap(); }
 
 // a position on the grid; moved: only the axes that were moved
 function snapPiece(pos, mesh, moved = [true, true, true]) {
@@ -229,8 +233,9 @@ setInterval(() => levelGrid(), 600);
 
 function paintGrid() {
   const steps = $('snap').checked;
-  const pieces = selKind() === 'pieces', snapOn = gridSnap();
-  const what = pieces ? 'Walls, floors and doors' : 'Objects other than walls, floors and doors';
+  const kind = snapKind(), pieces = kind === 'pieces', snapOn = gridSnap();
+  const what = kind === 'builder' ? 'What the room builder places' : pieces ? 'Walls, floors and doors'
+    : 'Objects other than walls, floors and doors';
   const gridOn = `On for ${what.toLowerCase()}: they land on the grid's squares of ${grid.step}`
     + `${pieces ? ', 64 units apart in height, and turn by quarter turns' : ''}; the grid shows while you move them. Click to move freely.`;
   const gridOff = `Off for ${what.toLowerCase()}. Click to make them land on the grid${pieces ? ', so they fit each other without adjusting' : ''}.`;
@@ -251,6 +256,7 @@ function storeGrid() {
     localStorage.setItem('ce-grid', grid.on ? '1' : '0');
     localStorage.setItem('ce-grid-snap-pieces', grid.pieces ? '1' : '0');
     localStorage.setItem('ce-grid-snap-other', grid.other ? '1' : '0');
+    localStorage.setItem('ce-grid-snap-builder', grid.builder ? '1' : '0');
     localStorage.setItem('ce-grid-step', grid.step);
   } catch (err) { /* private mode */ }
 }
@@ -258,11 +264,13 @@ for (const s of GRID_STEPS) $('grid-step').add(new Option(String(s), s));
 $('grid-step').value = grid.step;
 $('grid-btn').addEventListener('click', () => { grid.on = !grid.on; storeGrid(); paintGrid(); showGrid(); });
 function toggleGridSnap() {
-  const kind = selKind();
+  const kind = snapKind();
   grid[kind] = !grid[kind];
   storeGrid();
   updateSnap();
-  const what = kind === 'pieces' ? 'walls, floors and doors' : 'objects other than walls, floors and doors';
+  if (kind === 'builder') moveGhost(); else movePlaceGhost(placeGhost.hit);
+  const what = kind === 'builder' ? 'the room builder' : kind === 'pieces' ? 'walls, floors and doors'
+    : 'objects other than walls, floors and doors';
   status(grid[kind] ? `Snap to grid on for ${what}: squares of ${grid.step}.` : `Snap to grid off for ${what}.`);
 }
 function toggleStepSnap() {
@@ -434,16 +442,25 @@ function applyMood() {
                        a.QuadraticRadiusMult);
 }
 
-// A reference's light ({radius, color, flags, at}), or null: from the cell's data, else asked for once per object.
+// A reference's light ({radius, color, flags, at}), or null: from the cell's data, else asked for once per object;
+// a light the project made or changed shines as its edit says.
 function lightOf(r) {
-  if (r.light !== undefined) return r.light;
   const id = r.src.toLowerCase();
-  if (!gameLight.info.has(id)) {
-    gameLight.info.set(id, null);
-    fetch('/api/light?id=' + encodeURIComponent(r.src)).then((x) => x.json())
-      .then((li) => { gameLight.info.set(id, li); if (li) requestRender(); }).catch(() => {});
+  const own = state.edits.items?.[id];
+  const made = !!own && own.kind === 'LIGH' && !r.light;
+  let base = r.light;
+  if (base === undefined || made) {
+    const key = made && own.model ? `${id}|${own.model.toLowerCase()}` : id;
+    if (!gameLight.info.has(key)) {
+      gameLight.info.set(key, null);
+      fetch('/api/light?id=' + encodeURIComponent(r.src) + (made && own.model ? '&mesh=' + encodeURIComponent(own.model) : ''))
+        .then((x) => x.json()).then((li) => { gameLight.info.set(key, li); if (li) requestRender(); }).catch(() => {});
+    }
+    base = gameLight.info.get(key);
   }
-  return gameLight.info.get(id);
+  if (!own || !(base || made)) return base;
+  return { radius: own.radius ?? base?.radius ?? 0, color: own.color ?? base?.color ?? [0, 0, 0],
+           flags: own.lflags ?? base?.flags ?? 0, at: base?.at ?? null };
 }
 
 // Puts the point lights on the shown lights, the nearest ones when there are more than the pool takes. The pool
@@ -745,7 +762,7 @@ function propsText(p, lockable, names = {}) {
     parts.push(p.lock == null ? 'not locked' : p.lock > 0 ? `locked (level ${p.lock})` : 'locked (opens only with its key)');
     if (p.key) parts.push(`key: ${name(p.key, names.items)}`);
   }
-  if (p.trap) parts.push(`trapped: ${name(p.trap, names.spells)}`);
+  if (p.trap) parts.push(`trapped: ${name(p.trap, magicWin.spells(names.spells))}`);
   return parts.join(' · ');
 }
 
@@ -873,7 +890,7 @@ async function editOwnership() {
                                    items: names.globals.map((g) => ({ id: g })) }),
     'ow-key': (cur) => choose({ title: 'Choose the key', current: cur, none: 'No key',
                                 items: [...itemsWin.newItems(), ...names.items].filter((o) => o.key) }),
-    'ow-trap': (cur) => choose({ title: 'Choose the trap', current: cur, none: 'No trap', items: names.spells }),
+    'ow-trap': (cur) => choose({ title: 'Choose the trap', current: cur, none: 'No trap', items: magicWin.spells(names.spells) }),
   };
   for (const [id, list] of [['ow-npc', 'own-npcs'], ['ow-global', 'own-globals'], ['ow-key', 'own-keys'], ['ow-trap', 'own-spells']]) {
     suggest(q(id), list);
@@ -1496,6 +1513,7 @@ function updateButtons() {
                        remove: 'Take just this object out of its group' }[a]
     || 'Cmd/Ctrl+click more objects, then group them: a click on one then selects them all';
   $('swap').disabled = !objs.length;
+  $('blueprint').style.display = state.selection.filter((o) => o.visible && o.userData.ref.mesh).length > 1 ? '' : 'none';
   $('duplicate').disabled = !objs.length || objs.every(isNpc);
   $('duplicate').title = objs.length && objs.every(isNpc) ? NO_NPC_COPIES
     : 'A copy beside it (Cmd/Ctrl+D)';
@@ -2038,6 +2056,8 @@ async function openPicker({ title, items, types, placeholder, onPick, first = nu
   if (document.pointerLockElement) document.exitPointerLock();
   closeMenu();
   $('pk-title').textContent = title;
+  if (picker.title !== title) $('pk-search').value = '';      // a search for cells isn't one for objects
+  picker.title = title;
   $('pk-search').placeholder = placeholder || 'Search by name or id, e.g. chair, crate, torch…';
   const type = $('pk-type');
   type.innerHTML = '';
@@ -2057,6 +2077,8 @@ async function openPicker({ title, items, types, placeholder, onPick, first = nu
   if (last && [...type.options].some((o) => o.value === last)) type.value = last;
   picker.source = items;
   picker.onPick = onPick;
+  picker.many = false;
+  $('pk-many-row').style.display = action === 'Add' ? '' : 'none';
   picker.first = first;
   picker.star = star;
   // attach: the object it would be attached to, or true when that is where it is placed later
@@ -2092,10 +2114,11 @@ async function pickObject(title, onPick, attach = null, action = 'Add', group = 
   const fresh = [...npcEditor.newItems().map((o) => Object.assign(o, { cat: 'NPCs', rank: -1 })),
                  ...itemsWin.newObjects().map((o) => Object.assign(o, { rank: -1,
                    cat: TYPE_CATEGORY[o.type] || (o.type === 'Misc' ? (o.key ? 'Keys' : 'Clutter') : 'Other') }))];
-  const items = [...fresh, ...await opening(getCatalog())];
+  const catalog = await opening(getCatalog());
+  const items = [...(action === 'Add' ? blueprintItems(catalog, await roomSets()) : []), ...fresh, ...catalog];
   const files = [...new Set(items.map((o) => o.file).filter((f) => f && !OFFICIAL_FILES.includes(f.toLowerCase())))];
   const mods = files.map((f) => ['file:' + f, f.replace(/\.(esm|esp|omwaddon)$/i, '')]);
-  openPicker({ title, items, types: ['Favourites', 'Recent', ...OBJECT_CATEGORIES], onPick: withRecent(onPick),
+  openPicker({ title, items, types: ['Favourites', 'Recent', ...(action === 'Add' ? ['Blueprints'] : []), ...OBJECT_CATEGORIES], onPick: withRecent(onPick),
                attach, action, first: fav, star: { on: fav, toggle: (o) => toggleObjectFavorite(o.id) },
                groups: mods.length ? [{ label: 'Mods', options: mods }] : [], remember: 'objects',
                newItem: action === 'Add' });
@@ -2228,7 +2251,46 @@ function pickerRow(o, i) {
     st.addEventListener('click', async (e) => { e.stopPropagation(); await picker.star.toggle(o); paint(); paintPreviewStar(); });
     row.appendChild(st);
   }
-  row.addEventListener('click', () => (TOUCH && picker.sel !== i && previewShown() ? highlight(i) : pick(o)));
+  if (o.blueprint && !o.blueprint.ready) {                 // one of the user's: is it a room, and delete
+    const b = o.blueprint;
+    const change = async (fn) => { painter.sets = await roomSets(fn(await roomSets())); };
+    const room = document.createElement('span');
+    const paint = () => {
+      room.className = 'star bp-room' + (b.room ? ' on' : '');
+      room.innerHTML = icon(b.room ? 'homeFilled' : 'home');
+      room.title = b.room ? 'A room: it snaps to the grid, and is in the room builder as well. Click to make it furniture.'
+        : 'Furniture: placed freely, not in the room builder. Click to make it a room.';
+    };
+    paint();
+    room.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      b.room = !b.room;
+      paint();
+      status(b.room ? `${b.name} is now a room: it snaps to the grid, and is in the room builder as well.`
+        : `${b.name} is now furniture: it's placed freely, and no longer in the room builder.`);
+      await change((sets) => sets.map((x) => (x.name === b.name ? { ...x, room: b.room } : x)));
+      preview.shown = null;
+      showPreview(o);
+    });
+    const del = document.createElement('span');
+    del.className = 'star bp-del';
+    del.title = 'Delete this blueprint';
+    del.innerHTML = icon('trash');
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!sureDelete(b.name)) return;
+      await change((sets) => sets.filter((x) => x.name !== b.name));
+      picker.source = picker.source.filter((x) => x !== o);
+      filterPicker();
+      status(`Deleted the blueprint ${b.name}.`);
+    });
+    row.append(room, del);
+  }
+  row.addEventListener('click', (e) => {
+    if (TOUCH && picker.sel !== i && previewShown()) { highlight(i); return; }
+    picker.shift = e.shiftKey;
+    pick(o);
+  });
   row.addEventListener('mouseenter', () => { if (!TOUCH) showPreview(o); });
   return row;
 }
@@ -2260,6 +2322,9 @@ function filterPicker(atLast = false) {
 }
 
 function pick(o) {
+  // Add many: the switch above the list, or Shift held on the click
+  picker.many = $('pk-many-row').style.display !== 'none' && ($('pk-many').checked || !!picker.shift);
+  picker.shift = false;
   const fn = picker.onPick;
   if (picker.lastKey) storeNow(picker.lastKey, o.id);
   closePicker();
@@ -2617,13 +2682,23 @@ async function showPreview(o) {
   preview.shown = o;
   $('pk-pv-name').textContent = o.name || o.id;
   const from = o.file && o.file.toLowerCase() !== 'morrowind.esm' ? ` · ${o.file}` : '';
-  $('pk-pv-id').textContent = (o.name ? `${o.id} · ${o.type}` : `${o.cat || o.type} · ${o.type}`) + from;
+  const bp = o.blueprint;
+  $('pk-pv-id').textContent = bp ? `Blueprint · ${bp.items.length} objects · ${bp.room ? 'a room' : 'furniture'}${bp.ready ? '' : ' · yours'}`
+    : (o.name ? `${o.id} · ${o.type}` : `${o.cat || o.type} · ${o.type}`) + from;
   paintPreviewStar();
   const token = ++preview.token;
-  const parts = o.mesh ? await meshParts(o.mesh) : [];
+  const shown = bp ? bp.items.slice(0, 120) : [{ o, rel: [0, 0, 0], rot: [0, 0, 0], scale: 1 }];
+  const all = await Promise.all(shown.map((it) => (it.o.mesh ? meshParts(it.o.mesh) : [])));
   if (token !== preview.token) return;
   preview.group.clear();
-  for (const p of parts) preview.group.add(new THREE.Mesh(p.geometry, p.material));
+  shown.forEach((it, k) => {
+    const g = new THREE.Group();
+    for (const p of all[k]) g.add(new THREE.Mesh(p.geometry, p.material));
+    g.matrixAutoUpdate = false;
+    g.matrix.copy(refMatrix({ pos: it.rel, rot: it.rot, scale: it.scale }));
+    preview.group.add(g);
+  });
+  preview.group.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(preview.group);
   if (box.isEmpty()) {
     $('pk-pv-id').textContent += ' · no preview';
@@ -2659,6 +2734,7 @@ function renderPreview() {
 }
 
 $('pk-pv-use').addEventListener('click', () => { if (preview.shown) pick(preview.shown); });
+
 
 function paintPreviewStar() {
   const b = $('pk-pv-fav'), o = preview.shown;
@@ -2709,20 +2785,16 @@ function addAt(hit, kind = 'object', preset = null) {
   const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
   if (!preset) showAddMarker(hit);
   const put = async (o, opts = pickedOptions()) => {
+    if (o.blueprint) { await putBlueprint(o.blueprint, placePose(hit, o, null, preset?.turn)); return; }
     const parts = o.mesh ? await meshParts(o.mesh) : [];
     const box = new THREE.Box3();
     for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
-    const pos = point.clone();
-    if (normal.z > 0.6 && Number.isFinite(box.min.z)) pos.z -= box.min.z;
-    else pos.addScaledVector(normal, 2);
-    pos.fromArray(snapPiece(pos.toArray(), o.mesh));
-    const quarter = Math.PI / 2;
-    const yaw = ((Math.round((state.yaw + Math.PI) / quarter) * quarter) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+    const { pos: at, rot } = placePose(hit, o, box, preset?.turn);
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const tag = (!isNewNpc(o.id) && state.newTag) || null;
     const npc = o.type === 'NPC';
-    const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: npc ? 'npc' : 'mesh', mesh: npc ? null : o.mesh, pos: pos.toArray(),
-                rot: [0, 0, yaw], scale: 1, editable: true, origin: 'added', structure: false, tag, ...typeFlags(o.type) };
+    const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: npc ? 'npc' : 'mesh', mesh: npc ? null : o.mesh, pos: at,
+                rot, scale: 1, editable: true, origin: 'added', structure: false, tag, ...typeFlags(o.type) };
     r.orig = { pos: [...r.pos], rot: [...r.rot] };
     state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...r.pos], rot: [...r.rot], scale: 1, tag });
     state.cell.refs.push(r);
@@ -2737,7 +2809,7 @@ function addAt(hit, kind = 'object', preset = null) {
     state.joinCopy = null;
     if (preset && join && join.id === o.id && state.undo.length === join.from + 2) joinSteps(join.from, join.before);
     refreshVisibility();
-    select(obj.visible ? obj : null, false, true);
+    select(obj.visible && !state.placing ? obj : null, false, true);
     updateDirty();
     status(`Added ${o.name || o.id}` + (state.edits.attached[r.key] ? `, attached to ${baseRef.src}` : '')
            + (grouped ? `, in the group (${state.edits.groups[group].length} objects).` : '.')
@@ -2745,8 +2817,117 @@ function addAt(hit, kind = 'object', preset = null) {
   };
   if (preset) { put(preset.o, preset.opts).then(() => preset.then?.()); return; }
   if (kind === 'npc') { newNpc(put); return; }
-  pickObject('Add object', put, baseRef ? baseRef.src : null, 'Add',
-             group ? state.edits.groups[group].length : 0);
+  pickObject('Add object', async (o) => {
+    const many = picker.many;
+    await put(o);                                          // where the menu was opened
+    if (many) startPlacing('object', { o, opts: {}, many: true });
+  }, baseRef ? baseRef.src : null, 'Add', group ? state.edits.groups[group].length : 0);
+}
+
+const roomy = (o) => (o.blueprint ? o.blueprint.room : isPiece(o.mesh));
+
+// Where a placed object or blueprint goes: on the surface that was hit (a model stands on it by its lowest
+// point; on a wall it is a little off it), on the grid or the steps when those snaps are on, facing the camera
+// by quarter turns plus what Z and X turned it, standing on the side C chose (turn: {yaw, side}). box: the
+// model's own box, so one standing on another side still rests on its lowest point.
+// the sides an object can stand on: as made, on its back, on its left, on its front, on its right, upside down
+const SIDES = [[0, 0, 0], [Math.PI / 2, 0, 0], [0, Math.PI / 2, 0], [-Math.PI / 2, 0, 0], [0, -Math.PI / 2, 0], [Math.PI, 0, 0]];
+function placePose(hit, o, box, turn = null) {
+  const { yaw = 0, side = 0 } = turn || {};
+  const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1);
+  const pos = hit.point.clone();
+  const quarter = Math.PI / 2;
+  const facing = refMatrix({ pos: [0, 0, 0], rot: [0, 0, wrapAngle(Math.round((state.yaw + Math.PI) / quarter) * quarter + yaw)], scale: 1 });
+  const rot = side ? rotOf(facing.multiply(refMatrix({ pos: [0, 0, 0], rot: SIDES[side], scale: 1 }))) : rotOf(facing);
+  if (!o.blueprint) {
+    let minZ = NaN;
+    if (box && !box.isEmpty()) {
+      const m = refMatrix({ pos: [0, 0, 0], rot, scale: 1 });
+      minZ = Math.min(...[0, 1, 2, 3, 4, 5, 6, 7].map((k) => new THREE.Vector3(k & 1 ? box.max.x : box.min.x,
+        k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).applyMatrix4(m).z));
+    }
+    if (normal.z > 0.6 && Number.isFinite(minZ)) pos.z -= minZ;
+    else pos.addScaledVector(normal, 2);
+  }
+  const room = roomy(o);
+  let at = pos.toArray();
+  if (grid[room ? 'pieces' : 'other']) at = [toStep(at[0], grid.step), toStep(at[1], grid.step), room ? toStep(at[2], GRID_Z) : at[2]];
+  else if ($('snap').checked) at = [toStep(at[0], state.moveStep), toStep(at[1], state.moveStep), at[2]];
+  return { pos: at, rot };
+}
+
+// a blueprint's objects, as one undo step
+async function putBlueprint(b, { pos, rot }) {
+  const from = state.undo.length, before = entriesOf(state.edits);
+  const base = refMatrix({ pos, rot, scale: 1 });
+  for (const it of b.items) {
+    const w = base.clone().multiply(refMatrix({ pos: it.rel, rot: it.rot, scale: 1 }));
+    await addPiece(it.o, new THREE.Vector3().setFromMatrixPosition(w).toArray().map((v) => Math.round(v * 100) / 100), rotOf(w), it.scale);
+  }
+  if (b.items.length > 1) {
+    joinSteps(from, before);
+    if (state.undo.length > from) state.undo[state.undo.length - 1].label = `placed ${b.name}`;
+  }
+  refreshVisibility();
+  updateDirty();
+  status(`Placed the blueprint ${b.name} (${b.items.length} objects).`);
+}
+
+// see-through models: items [{o, rel, rot, scale}] as one group (not hit by clicks)
+async function ghostOf(items) {
+  const parts = await Promise.all(items.map((it) => (it.o.mesh ? meshParts(it.o.mesh) : [])));
+  const g = new THREE.Group();
+  items.forEach((it, k) => {
+    const piece = new THREE.Group();
+    for (const p of parts[k]) {
+      const m = new THREE.Mesh(p.geometry, p.material.clone());
+      Object.assign(m.material, { transparent: true, opacity: 0.55, depthWrite: false });
+      m.raycast = () => {};
+      piece.add(m);
+    }
+    piece.matrixAutoUpdate = false;
+    piece.matrix.copy(refMatrix({ pos: it.rel, rot: it.rot || [0, 0, 0], scale: it.scale || 1 }));
+    g.add(piece);
+  });
+  g.matrixAutoUpdate = false;
+  return g;
+}
+function dropGhost(g) {
+  if (!g) return;
+  g.parent?.remove(g);
+  g.traverse((m) => { if (m.isMesh) m.material.dispose(); });
+}
+
+// what is being placed, shown see-through where a click would put it
+const placeGhost = { group: null, token: 0, box: null, hit: null };
+async function startPlaceGhost(o) {
+  const token = ++placeGhost.token;
+  const items = o.blueprint ? o.blueprint.items : [{ o, rel: [0, 0, 0], rot: [0, 0, 0], scale: 1 }];
+  const g = await ghostOf(items);
+  if (token !== placeGhost.token || !state.placing) { dropGhost(g); return; }
+  placeGhost.box = o.blueprint ? null : new THREE.Box3().setFromObject(g);
+  placeGhost.group = g;
+  world.add(g);
+  movePlaceGhost(placeGhost.hit);
+}
+function endPlaceGhost() {
+  placeGhost.token++;
+  dropGhost(placeGhost.group);
+  placeGhost.group = placeGhost.hit = null;
+}
+// true when the preview stands in for the round marker
+function movePlaceGhost(hit) {
+  placeGhost.hit = hit || null;
+  const g = placeGhost.group, o = state.placing?.preset?.o;
+  if (!g || !o) return false;
+  g.visible = !!hit;
+  if (hit) {
+    const { pos, rot } = placePose(hit, o, placeGhost.box, state.placing.turn);
+    g.matrix.copy(refMatrix({ pos, rot, scale: 1 }));
+    g.matrixWorldNeedsUpdate = true;
+  }
+  requestRender();
+  return true;
 }
 
 // --- Placing ---------------------------------------------------------------
@@ -2755,11 +2936,14 @@ function addAt(hit, kind = 'object', preset = null) {
 function startPlacing(kind = 'object', preset = null) {
   if (state.placing) return;
   const body = document.body;
-  state.placing = { hidden: body.classList.contains('panel-hidden'), open: body.classList.contains('panel-open'), kind, preset };
+  state.placing = { hidden: body.classList.contains('panel-hidden'), open: body.classList.contains('panel-open'), kind, preset, turn: { yaw: 0, side: 0 } };
   if (TOUCH && !sidePanel()) body.classList.remove('panel-open');
+  body.classList.add('placing');
   const name = preset && (preset.o.name || preset.o.id);
+  if (preset && kind === 'object') { setSnapMode(roomy(preset.o) ? 'pieces' : 'other'); startPlaceGhost(preset.o); }
   $('place-text').textContent = kind === 'npc' ? `Click where ${name || 'the NPC'} should stand (a floor, the ground).`
-    : preset ? `Click where to place ${name} (a floor, a table, a wall).`
+    : preset && preset.many ? `Click to place ${name}. Each click adds one more; Esc when done.`
+    : preset ? `Click where to place ${name}. Shift+click to add more.`
     : 'Click where to place the object (a floor, a table, a wall).';
   $('place-banner').classList.add('open');
   canvas.style.cursor = 'crosshair';
@@ -2777,30 +2961,35 @@ function stopPlacing(placed = false) {
   $('place-text').textContent = 'Click where to place the object (a floor, a table, a wall).';
   document.body.classList.toggle('panel-hidden', p.hidden);
   document.body.classList.toggle('panel-open', p.open);
+  document.body.classList.remove('placing');
   $('place-banner').classList.remove('open');
   canvas.style.cursor = '';
+  endPlaceGhost();
+  if (!painter.on) setSnapMode(null);
   showAddMarker(null);
   syncGizmo();
   resize();
 }
 
-function placeAt(ndcX, ndcY) {
+// again: Shift was held, so the same object can be placed once more (as Add many does every time)
+function placeAt(ndcX, ndcY, again = false) {
   const hit = surfaceAt(ndcX, ndcY);
-  const { kind, preset } = state.placing || {};
+  const { kind, preset, turn } = state.placing || {};
+  if (preset && kind === 'object' && (preset.many || again)) { addAt(hit, kind, { ...preset, turn: { ...turn } }); return; }
   stopPlacing(true);
-  addAt(hit, kind, preset);
+  addAt(hit, kind, preset && { ...preset, turn });
 }
 
 $('place-cancel').addEventListener('click', () => stopPlacing());
 
 // --- Room builder -----------------------------------------------------------
 // A mode for building rooms: the panel shows a style's room pieces by what they're for (the server finds the
-// pieces by how the game places them, pieces.py) and the room sets saved from selections; each click puts the
-// chosen piece or set on the grid square under the pointer. Z and X turn it by quarter turns, Page Up and Page
-// Down change the height by 64, the wheel picks the next piece, a short right-click takes away a piece added here.
+// pieces by how the game places them, pieces.py) and the room blueprints; each click puts the
+// chosen piece or blueprint on the grid square under the pointer (anywhere with snap to grid off). Z and X turn it by quarter turns, Page Up and Page
+// Down change the height by 64, [ and ] pick the next piece, Alt+click removes a piece added here.
 
-const painter = { on: false, style: '', all: [], pieces: [], at: 0, set: null, sets: [], yaw: 0, level: 0,
-                  ghost: null, ghostKey: '', square: null, stroke: null, wheel: 0, point: null, token: 0,
+const painter = { on: false, style: '', all: [], pieces: [], at: 0, set: null, sets: [], ready: [], yaw: 0, level: 0,
+                  ghost: null, ghostKey: '', square: null, stroke: null, point: null, token: 0,
                   thumbObserver: null, lift: 0, known: null, hidden: false };
 const STYLE_ALIASES = { lava: 'lavacave', mold: 'moldcave', mud: 'mudcave', py: 'pycave', bone: 'bonecave',
                         strong: 'stronghold', strongruin: 'stronghold', r: 'redoran', h: 'hlaalu', v: 'vivec',
@@ -2835,17 +3024,42 @@ function styleName(key) {
   return STYLE_NAMES[k] ? STYLE_NAMES[k] + (side === 'ex' ? ' (outside)' : '') : key;
 }
 
+// the ids (lower case) of the load order's room pieces
+function roomPieceIds() {
+  painter.known = painter.known || fetch('/api/room-pieces').then((r) => r.json()).then((ids) => new Set(ids))
+    .catch((err) => { painter.known = null; throw err; });
+  return painter.known;
+}
+
 async function loadPieces() {
-  if (!painter.known) {
-    status('Finding the room pieces…');
-    painter.known = opening(fetch('/api/room-pieces').then((r) => r.json()).then((ids) => new Set(ids)));
-  }
+  if (!painter.known) status('Finding the room pieces…');
   let known;
-  try { known = await painter.known; } catch (err) { painter.known = null; status('The room pieces didn\'t load.', true); return false; }
+  try { known = await opening(roomPieceIds()); } catch (err) { status('The room pieces didn\'t load.', true); return false; }
   painter.all = (await opening(getCatalog())).filter((o) => known.has(o.id.toLowerCase()));
   painter.sets = await roomSets();
   status('');
   return true;
+}
+
+// The blueprints: the editor's own rooms (rooms.js) and the user's, as [{name, room, ready, style, items}] with
+// items [{o: the catalogue's object, rel, rot, scale}]. One of the editor's is left out when the load order lacks a
+// piece of it; a user's keeps the objects that are there.
+function blueprintsOf(catalog, sets) {
+  const byId = new Map(catalog.map((o) => [o.id.toLowerCase(), o]));
+  for (const o of itemsWin.newObjects()) byId.set(o.id.toLowerCase(), o);
+  const built = ROOMS.map((r) => ({ name: r.name, style: r.style, ready: true, room: true,
+    pieces: r.pieces.map(([id, x, y, z, deg]) => ({ id, pos: [x, y, z], rz: deg * DEG })) }));
+  return [...built, ...sets].map((b) => {
+    const items = b.pieces.map((p) => ({ o: byId.get(p.id.toLowerCase()), rel: p.pos, rot: p.rot || [0, 0, p.rz || 0], scale: p.scale || 1 }))
+      .filter((it) => it.o && it.o.mesh);
+    return items.length && !(b.ready && items.length < b.pieces.length)
+      ? { name: b.name, style: b.style || null, ready: !!b.ready, room: b.room !== false, items } : null;
+  }).filter(Boolean);
+}
+// as the Add object window lists them
+function blueprintItems(catalog, sets) {
+  return blueprintsOf(catalog, sets).map((b) => ({ id: b.name, name: '', type: 'Blueprint', cat: 'Blueprints',
+    rank: -1, mesh: b.items[0].o.mesh, file: '', blueprint: b }));
 }
 
 async function roomSets(sets = null) {
@@ -2857,12 +3071,17 @@ async function roomSets(sets = null) {
 }
 
 async function chooseStyle() {
-  const counts = new Map();
-  for (const o of painter.all) { const s = styleOf(o); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
+  const styles = new Map();
+  for (const o of painter.all) { const s = styleOf(o); if (s) styles.set(s, [...(styles.get(s) || []), o]); }
+  // the piece that shows a style best: one with a wall (a room's corner, a plain hall, a room's side, a wall)
+  const plain = (o) => !/stair|ramp|door|jamb|rail|pillar|post|column|ceil|floor|window|win_|grate/.test(o.id);
+  const shows = (list) => [/room.*corner/, /hall|corr/, /room|corner|side/, /wall|_w_/]
+    .map((re) => list.find((o) => re.test(o.id) && plain(o))).find(Boolean) || list.find(plain) || list[0];
   return choose({
-    title: 'Room builder: choose a style', none: 'All room pieces', current: painter.style,
-    items: [...counts].filter(([, n]) => n >= 6).map(([k, n]) => ({
-      id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${n} pieces` })) });
+    title: 'Room builder: choose a style', none: 'All room pieces', current: painter.style, views: false,
+    items: [...styles].filter(([, list]) => list.length >= 6).map(([k, list]) => ({
+      id: k, name: styleName(k), type: k.startsWith('ex') ? 'Outside' : 'Inside', note: `${list.length} pieces`,
+      thumb: () => thumbPicture(shows(list).mesh) })) });
 }
 
 // at: the height to build at (a floor that was right-clicked)
@@ -2888,6 +3107,7 @@ async function openPainter(at = null) {
     select(null);
     gizmo.detach();
     document.body.classList.add('building');
+    setSnapMode('builder');
     canvas.style.cursor = 'crosshair';
     showGrid();
     resize();
@@ -2915,6 +3135,7 @@ function closePainter() {
   painter.erasing = false;
   setGhost(null);
   document.body.classList.remove('building');
+  setSnapMode(null);
   document.body.classList.toggle('panel-hidden', painter.hidden);
   canvas.style.cursor = '';
   showGrid();
@@ -2968,18 +3189,23 @@ function filterPainter() {
     d.querySelector('summary').textContent = `${title} (${count})`;
     return d.querySelector('.rb-grid');
   };
-  const sets = painter.sets.filter((s) => match(s.name));
-  if (sets.length) {
-    const grid = section('Room sets', sets.length);
-    for (const s of sets) {
+  // the room blueprints: the editor's of every style (the chosen one's first), then the user's
+  painter.ready = blueprintsOf(catalogData || painter.all, painter.sets).filter((b) => b.room);
+  const ready = painter.ready.filter((s) => match(s.name))
+    .sort((a, b) => (b.ready - a.ready) || (b.style === painter.style) - (a.style === painter.style));
+  for (const [title, list] of [['Blueprints', ready]]) {
+    if (!list.length) continue;
+    const grid = section(title, list.length);
+    for (const s of list) {
       const cell = grid.appendChild(document.createElement('div'));
-      cell.className = 'rb-cell rb-set' + (painter.set === s ? ' sel' : '');
-      cell.title = `${s.name}: ${s.pieces.length} pieces`;
-      cell.innerHTML = `<div class="th">${icon('group')}<span>${s.pieces.length}</span></div><div class="cn"></div>`
-        + `<button class="ghost icon rb-del" title="Delete this set">${icon('x')}</button>`;
+      cell.className = 'rb-cell rb-set';
+      cell.set = s;
+      cell.title = `${s.name}${s.ready ? ` (${styleName(s.style)})` : ', yours'}: a blueprint, ${s.items.length} objects. Click in the view to place it.`;
+      cell.innerHTML = `<div class="th">${icon(s.ready ? 'home' : 'group')}<span>${s.items.length}</span></div><div class="cn"></div>`
+        + (s.ready ? '' : `<button class="ghost icon rb-del" title="Delete this set">${icon('x')}</button>`);
       cell.querySelector('.cn').textContent = s.name;
       cell.addEventListener('click', () => pickSet(s));
-      cell.querySelector('.rb-del').addEventListener('click', (e) => { e.stopPropagation(); deleteSet(s); });
+      cell.querySelector('.rb-del')?.addEventListener('click', (e) => { e.stopPropagation(); deleteSet(s); });
     }
   }
   let grid = null, last = null;
@@ -2995,20 +3221,22 @@ function filterPainter() {
     cell.addEventListener('click', () => pickPiece(i));
     painter.thumbObserver.observe(cell);
   });
-  if (!sets.length && !painter.pieces.length) box.innerHTML = '<div class="npc-hint rb-empty">Nothing matches.</div>';
-  if (painter.set && sets.includes(painter.set)) pickSet(painter.set); else pickPiece(painter.at);
+  if (!ready.length && !painter.pieces.length) box.innerHTML = '<div class="npc-hint rb-empty">Nothing matches.</div>';
+  const again = painter.set && ready.find((b) => b.name === painter.set.name);
+  if (again) pickSet(again); else pickPiece(painter.at);
 }
 
 function paintSelection() {
   for (const c of $('rb-groups').querySelectorAll('.rb-cell')) {
-    c.classList.toggle('sel', painter.set ? c.classList.contains('rb-set') && c.title.startsWith(painter.set.name + ':')
-      : c.classList.contains('rb-piece') && +c.dataset.i === painter.at);
+    c.classList.toggle('sel', painter.set ? c.set?.name === painter.set.name
+      : !painter.idle && c.classList.contains('rb-piece') && +c.dataset.i === painter.at);
   }
   $('rb-groups').querySelector('.rb-cell.sel')?.scrollIntoView({ block: 'nearest' });
 }
 
 function pickPiece(i) {
   painter.set = null;
+  painter.idle = false;
   if (painter.pieces.length) painter.at = (i + painter.pieces.length) % painter.pieces.length;
   paintSelection();
   setGhost(brush());
@@ -3017,6 +3245,7 @@ function pickPiece(i) {
 
 function pickSet(s) {
   painter.set = s;
+  painter.idle = false;
   paintSelection();
   setGhost(brush());
   paintInfo();
@@ -3024,19 +3253,14 @@ function pickSet(s) {
 
 // what a click puts down: pieces relative to the square's centre at the builder's height, unturned
 function brush() {
-  if (painter.set) {
-    const byId = new Map(painter.all.map((o) => [o.id.toLowerCase(), o]));
-    return { key: 'set:' + painter.set.name, items: painter.set.pieces.map((p) => {
-      const o = byId.get(p.id.toLowerCase()) || catalogData?.find((c) => c.id.toLowerCase() === p.id.toLowerCase());
-      return o && { o, rel: p.pos, rz: p.rz };
-    }).filter(Boolean) };
-  }
+  if (painter.idle) return null;                           // a blueprint was just placed: nothing is chosen
+  if (painter.set) return { key: 'blueprint:' + painter.set.name, items: painter.set.items };
   const o = painter.pieces[painter.at];
-  return o ? { key: 'piece:' + o.id + ':' + painter.lift, items: [{ o, rel: [0, 0, painter.lift], rz: 0 }] } : null;
+  return o ? { key: 'piece:' + o.id + ':' + painter.lift, items: [{ o, rel: [0, 0, painter.lift], rot: [0, 0, 0], scale: 1 }] } : null;
 }
 
 function paintInfo() {
-  const b = painter.set ? painter.set.name : painter.pieces[painter.at]?.id || 'Nothing chosen';
+  const b = painter.idle ? 'Nothing chosen' : painter.set ? painter.set.name : painter.pieces[painter.at]?.id || 'Nothing chosen';
   const deg = Math.round(((painter.yaw / DEG) % 360 + 360) % 360);
   $('rb-info').textContent = `${b} · facing ${deg}°`;
   $('rb-level').textContent = String(painter.level);
@@ -3046,29 +3270,11 @@ function paintInfo() {
 async function setGhost(b) {
   const token = ++painter.token;
   const key = b ? b.key : '';
-  if (painter.ghost && painter.ghostKey !== key) {
-    painter.ghost.parent?.remove(painter.ghost);
-    painter.ghost.traverse((m) => { if (m.isMesh) m.material.dispose(); });
-    painter.ghost = null;
-  }
+  if (painter.ghost && painter.ghostKey !== key) { dropGhost(painter.ghost); painter.ghost = null; }
   painter.ghostKey = key;
   if (!b || painter.ghost) { moveGhost(); return; }
-  const parts = await Promise.all(b.items.map((it) => meshParts(it.o.mesh)));
-  if (token !== painter.token || !painter.on) return;
-  const g = new THREE.Group();
-  b.items.forEach((it, k) => {
-    const piece = new THREE.Group();
-    for (const p of parts[k]) {
-      const m = new THREE.Mesh(p.geometry, p.material.clone());
-      Object.assign(m.material, { transparent: true, opacity: 0.55, depthWrite: false });
-      m.raycast = () => {};
-      piece.add(m);
-    }
-    piece.matrixAutoUpdate = false;
-    piece.matrix.copy(refMatrix({ pos: it.rel, rot: [0, 0, it.rz], scale: 1 }));
-    g.add(piece);
-  });
-  g.matrixAutoUpdate = false;
+  const g = await ghostOf(b.items);
+  if (token !== painter.token || !painter.on) { dropGhost(g); return; }
   painter.ghost = g;
   moveGhost();
 }
@@ -3111,7 +3317,8 @@ function paintPoint(x, y) {
   raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
   const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -painter.level), new THREE.Vector3());
   if (!p || p.distanceTo(camera.position) > 20000) return null;
-  return [toStep(p.x, grid.step), toStep(p.y, grid.step), painter.level];
+  const at = (v) => (grid.builder ? toStep(v, grid.step) : Math.round(v));
+  return [at(p.x), at(p.y), painter.level];
 }
 
 function paintHover(e) {
@@ -3119,7 +3326,7 @@ function paintHover(e) {
   painter.point = e.target === canvas && !state.looking ? paintPoint(e.clientX, e.clientY) : null;
   moveGhost();
   if (painter.stroke?.erase) { if (e.target === canvas) paintErase(e.clientX, e.clientY); return; }
-  if (painter.stroke && painter.point) paintHere();
+  if (painter.stroke && painter.point && !painter.stroke.done.size) paintHere();   // a click places once; dragging adds nothing
 }
 
 // with Alt (Option) held, a click takes pieces away: no ghost, an eraser cursor
@@ -3131,13 +3338,13 @@ function setErasing(on) {
 }
 
 // add one object, as Add object does
-async function addPiece(o, pos, rot) {
+async function addPiece(o, pos, rot, scale = 1) {
   const uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const tag = state.newTag || null;
-  const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: 'mesh', mesh: o.mesh, pos, rot, scale: 1,
+  const r = { key: 'added|' + uid, id: o.id, src: o.id, kind: 'mesh', mesh: o.mesh, pos, rot, scale,
               editable: true, origin: 'added', structure: false, tag, ...typeFlags(o.type) };
   r.orig = { pos: [...r.pos], rot: [...r.rot] };
-  state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...pos], rot: [...rot], scale: 1, tag });
+  state.edits.added.push({ uid, cell: state.cell.name, id: o.id, pos: [...pos], rot: [...rot], scale, tag });
   state.cell.refs.push(r);
   const obj = await makeObject(r);
   world.add(obj);
@@ -3149,20 +3356,21 @@ async function addPiece(o, pos, rot) {
 async function paintHere() {
   const b = brush();
   if (!b || !b.items.length || !painter.point) return;
+  const stroke = painter.stroke;                           // the click may end before a big set is all in
   const sq = `${painter.point.join(',')},${painter.yaw.toFixed(3)}`;
-  if (painter.stroke.done.has(sq)) return;
-  painter.stroke.done.add(sq);
+  if (stroke.done.has(sq)) return;
+  stroke.done.add(sq);
   const m = brushMatrix();
   const gone = new Set(state.edits.deleted);
   for (const it of b.items) {
-    const w = m.clone().multiply(refMatrix({ pos: it.rel, rot: [0, 0, it.rz], scale: 1 }));
+    const w = m.clone().multiply(refMatrix({ pos: it.rel, rot: it.rot, scale: 1 }));
     const pos = new THREE.Vector3().setFromMatrixPosition(w).toArray().map((v) => Math.round(v * 100) / 100);
     const rot = rotOf(w);
     const same = state.edits.added.some((a) => a.cell === state.cell.name && a.id === it.o.id && !gone.has('added|' + a.uid)
       && a.pos.every((v, i) => Math.abs(v - pos[i]) < 0.5) && Math.cos(a.rot[2] - rot[2]) > 0.9999);
     if (same) continue;
-    await addPiece(it.o, pos, rot);
-    painter.stroke.count++;
+    await addPiece(it.o, pos, rot, it.scale);
+    stroke.count++;
   }
   refreshVisibility();
   updateDirty();
@@ -3179,21 +3387,28 @@ function endStroke() {
   painter.stroke = null;
   if (s.count + s.gone > 1) {
     joinSteps(s.from, s.before);
-    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = s.gone ? `took away ${s.gone} pieces` : `built ${s.count} pieces`;
+    if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = s.gone ? `removed ${s.gone} pieces` : `built ${s.count} pieces`;
   }
-  if (s.count) status(`Placed ${s.count === 1 ? brush()?.items[0]?.o.id : `${s.count} pieces`}.`);
-  if (s.gone) status(`Took away ${s.gone === 1 ? 'a piece' : `${s.gone} pieces`}.`);
+  if (s.done.size && !s.erase && painter.set) {            // a blueprint is placed once, then nothing is chosen
+    status(`Placed the blueprint ${painter.set.name} (${painter.set.items.length} objects).`);
+    painter.set = null;
+    painter.idle = true;
+    paintSelection();
+    setGhost(null);
+    paintInfo();
+  } else if (s.count) status(`Placed ${s.count === 1 ? brush()?.items[0]?.o.id : `${s.count} pieces`}.`);
+  if (s.gone) status(`Removed ${s.gone === 1 ? 'a piece' : `${s.gone} pieces`}.`);
   updateDirty();
 }
 
-// Alt+click: take away the piece under the pointer if it was added in this cell (in a stroke, each one it passes)
+// Alt+click: remove the piece under the pointer if it was added in this cell (in a stroke, each one it passes)
 function paintErase(x, y) {
   raycaster.setFromCamera(new THREE.Vector2(...ndc(x, y)), camera);
   const hit = raycaster.intersectObjects(world.children, true).find((h) => visibleChain(h.object) && refOf(h.object));
   const obj = hit && refOf(hit.object);
   const r = obj?.userData.ref;
   if (!r || r.origin !== 'added' || !r.editable) {
-    if (!painter.stroke?.gone) status('Alt+click takes away pieces added here; other objects stay.');
+    if (!painter.stroke?.gone) status(`${/Mac|iPhone|iPad/.test(navigator.platform) ? 'Option' : 'Alt'}+click only removes pieces you added to this cell.`);
     return;
   }
   state.undo.push({ obj, deleted: [obj] });
@@ -3212,47 +3427,65 @@ function paintLevel(sign) {
   levelGrid(true);
 }
 
-// Save as a room set: the selected objects, relative to the grid square at the middle of their footing and the
-// height they stand on, so a set stands on the grid as pieces do
-async function saveRoomSet() {
-  const objs = state.selection.filter((o) => o.visible && o.userData.ref.mesh);
-  if (!objs.length) return;
+// Save as a blueprint: the objects relative to the middle of their footing (the grid square there for a room) and
+// the height they stand on. A room snaps to the grid and shows in the room builder: guessed from the objects (most
+// are room pieces), and the checkbox says otherwise.
+async function saveBlueprint(objs = state.selection, suggest = '') {
+  objs = objs.filter((o) => o.visible && o.userData.ref.mesh && o.userData.ref.kind === 'mesh');
+  if (!objs.length) { status('Nothing here to save as a blueprint.', true); return; }
+  let known = new Set();
+  try { known = await roomPieceIds(); } catch (err) { /* guessed from the models' folders */ }
+  const isRoom = (r) => (known.size ? known.has(r.src.toLowerCase()) : isPiece(r.mesh));
+  const guess = objs.filter((o) => isRoom(o.userData.ref)).length * 2 > objs.length;
+  const got = await askText(objs.length > 1 ? `Save ${objs.length} objects as a blueprint` : 'Save as a blueprint',
+                            'A name, e.g. Table with plates', suggest || (objs.length === 1 ? objs[0].userData.ref.src : ''),
+                            { label: 'This is a room: it snaps to the grid, and is in the room builder as well', on: guess });
+  if (!got) return;
+  const { text: name, on: room } = got;
   const box = boxOf(objs);
   const c = box.getCenter(new THREE.Vector3());
-  const ox = toStep(c.x, grid.step), oy = toStep(c.y, grid.step), oz = Math.round(box.min.z);
-  const name = await askText('Save as a room set', 'A name for the set, e.g. Hlaalu chapel',
-                             objs.length === 1 ? objs[0].userData.ref.src : '');
-  if (!name) return;
+  const ox = room ? toStep(c.x, grid.step) : Math.round(c.x), oy = room ? toStep(c.y, grid.step) : Math.round(c.y);
+  const oz = Math.round(box.min.z);
   const pieces = objs.map((o) => {
     const r = o.userData.ref;
+    const tilted = Math.abs(r.rot[0]) > 1e-4 || Math.abs(r.rot[1]) > 1e-4;
     return { id: r.src, pos: [r.pos[0] - ox, r.pos[1] - oy, r.pos[2] - oz].map((v) => Math.round(v * 100) / 100),
-             rz: Math.round(r.rot[2] * 1e5) / 1e5 };
+             rz: Math.round(r.rot[2] * 1e5) / 1e5, ...(tilted ? { rot: r.rot.map((v) => Math.round(v * 1e5) / 1e5) } : {}),
+             ...(Math.abs((r.scale || 1) - 1) > 1e-3 ? { scale: r.scale } : {}) };
   });
   const sets = (await roomSets()).filter((s) => s.name !== name);
-  painter.sets = await roomSets([...sets, { name, pieces }].sort((a, b) => a.name.localeCompare(b.name)));
-  status(`Saved the room set ${name} (${pieces.length} pieces): it's in the room builder.`);
+  painter.sets = await roomSets([...sets, { name, room, pieces }].sort((a, b) => a.name.localeCompare(b.name)));
+  status(`Saved the blueprint ${name} (${pieces.length} objects): it's under Blueprints in Add object…${room ? ', and in the room builder as well' : ''}.`);
   if (painter.on) filterPainter();
 }
 
+// blueprints aren't part of a project's edits, so undo doesn't bring one back: asked first
+const sureDelete = (name) => confirm(`Delete your blueprint "${name}"? This can't be undone.`);
+
 async function deleteSet(s) {
+  if (!sureDelete(s.name)) return;
   painter.sets = await roomSets(painter.sets.filter((x) => x.name !== s.name));
   if (painter.set?.name === s.name) painter.set = null;
-  status(`Deleted the room set ${s.name}.`);
+  status(`Deleted the blueprint ${s.name}.`);
   filterPainter();
 }
 
-function askText(title, placeholder, value = '') {
+// check: {label, on} adds a checkbox, and the answer is then {text, on}
+function askText(title, placeholder, value = '', check = null) {
   return new Promise((resolve) => {
     const bg = document.createElement('div');
     bg.className = 'dialog-bg';
     bg.innerHTML = '<div class="dialog ask-dialog"><h3></h3><input type="text" maxlength="60">'
+      + (check ? '<label class="check as-check"><input type="checkbox"> <span></span></label>' : '')
       + '<div class="bar"><button class="as-cancel">Cancel</button><button class="primary as-ok">Save</button></div></div>';
     document.body.appendChild(bg);
     bg.querySelector('h3').textContent = title;
     const i = bg.querySelector('input');
     i.placeholder = placeholder;
     i.value = value;
-    const done = (v) => { bg.remove(); resolve(v); resumeFlySoon(); };
+    const box = bg.querySelector('.as-check input');
+    if (check) { bg.querySelector('.as-check span').textContent = check.label; box.checked = !!check.on; }
+    const done = (v) => { bg.remove(); resolve(v && check ? { text: v, on: box.checked } : v); resumeFlySoon(); };
     bg.querySelector('.as-cancel').addEventListener('click', () => done(null));
     bg.querySelector('.as-ok').addEventListener('click', () => done(i.value.trim() || null));
     bg.addEventListener('keydown', (e) => {
@@ -3280,7 +3513,7 @@ function addObject() {
   if (why) { status(why, true); return; }
   stopPlacing();
   const group = groupAction() === 'ungroup' ? groupOf(state.selected.userData.ref.key) : null;
-  pickObject('Add object', (o) => startPlacing('object', { o, opts: pickedOptions() }),
+  pickObject('Add object', (o) => startPlacing('object', { o, opts: pickedOptions(), many: picker.many }),
              true, 'Add', group ? state.edits.groups[group].length : 0);
 }
 
@@ -3323,6 +3556,7 @@ function swapSelected() {
 $('add').addEventListener('click', addObject);
 $('add-npc').addEventListener('click', addNpc);
 $('swap').addEventListener('click', swapSelected);
+$('blueprint').addEventListener('click', () => saveBlueprint());
 
 // --- Quick menu (right click / long-press) ----------------------------------
 
@@ -3437,7 +3671,7 @@ function openMenuAt(x, y, own = null, before = []) {
         }
       }
       if (!TOUCH && state.selection.some((o) => o.userData.ref.mesh)) {
-        item(state.selection.length > 1 ? `Save ${state.selection.length} as a room set…` : 'Save as a room set…', saveRoomSet);
+        item(state.selection.length > 1 ? `Save ${state.selection.length} as a blueprint…` : 'Save as a blueprint…', () => saveBlueprint());
       }
       item('Focus selection', lookAtSelected);
     }
@@ -3446,6 +3680,9 @@ function openMenuAt(x, y, own = null, before = []) {
     if (target) m.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
     item('Add object here…', () => addAt(hit));
     item('Add NPC here…', () => addAt(hit, 'npc'));
+  }
+  if (!TOUCH && !target && objByKey.size) {
+    item('Save this cell as a blueprint…', () => saveBlueprint([...objByKey.values()], state.cell.name));
   }
   showAddMarker(hit);
   m.classList.add('open');
@@ -3795,7 +4032,7 @@ canvas.addEventListener('mousedown', (e) => {
   down = { x: e.clientX, y: e.clientY, button: e.button, onGizmo: gizmo.axis !== null && !state.mouseLook };
   if (painter.on && e.button === 0 && !state.mouseLook) { down = null; startStroke(e); return; }
   if (state.mouseLook) {
-    if (e.button === 0 && state.placing) { placeAt(0, 0); return; }
+    if (e.button === 0 && state.placing) { placeAt(0, 0, e.shiftKey); return; }
     if (e.button === 0) pickAt(0, 0, e.metaKey || e.ctrlKey, e.altKey);
     if (e.button === 2) {
       pauseFly();
@@ -3825,7 +4062,7 @@ window.addEventListener('mouseup', (e) => {
   if (e.button === 0 && down && !down.onGizmo && !state.mouseLook && e.target === canvas
       && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) {
     const [nx, ny] = ndc(e.clientX, e.clientY);
-    if (state.placing) placeAt(nx, ny);
+    if (state.placing) placeAt(nx, ny, e.shiftKey);
     else pickAt(nx, ny, e.metaKey || e.ctrlKey || !!state.multiTouch, e.altKey);
   }
   down = null;
@@ -3837,7 +4074,8 @@ canvas.addEventListener('dblclick', (e) => {
 window.addEventListener('mousemove', (e) => {
   if (painter.on && !state.mouseLook) paintHover(e);
   if (state.placing && !state.looking && e.target === canvas) {
-    showAddMarker(surfaceAt(...(state.mouseLook ? [0, 0] : ndc(e.clientX, e.clientY))));
+    const hit = surfaceAt(...(state.mouseLook ? [0, 0] : ndc(e.clientX, e.clientY)));
+    showAddMarker(movePlaceGhost(hit) ? null : hit);
   }
   if (!state.looking && !state.mouseLook) return;
   state.lookMoved = (state.lookMoved || 0) + Math.abs(e.movementX) + Math.abs(e.movementY);
@@ -3853,12 +4091,6 @@ const wheel = { at: 0, dist: 600 };
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (gizmo.dragging) return;
-  if (painter.on && !e.shiftKey) {
-    // the wheel picks the piece (Shift and the wheel move the camera); a trackpad's small scrolls add up
-    painter.wheel += e.deltaMode ? e.deltaY * 40 : e.deltaY;
-    if (Math.abs(painter.wheel) >= 60) { pickPiece(painter.set ? 0 : painter.at + Math.sign(painter.wheel)); painter.wheel = 0; }
-    return;
-  }
   const notches = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY * 10 : e.deltaY / 100;
   if (!notches) return;
   const now = performance.now();
@@ -3907,6 +4139,14 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); paintLevel(e.key === 'PageUp' ? 1 : -1); return; }
     if (k === 'escape') { closePainter(); return; }
     if (k === '[' || k === ']') { pickPiece(painter.set ? 0 : painter.at + (k === '[' ? -1 : 1)); return; }
+  }
+  // while placing: Z X turn it, C stands it on its next side (a book upright, a plate on its edge; Shift: the one before)
+  if (state.placing?.preset?.o && (k === 'z' || k === 'x' || k === 'c')) {
+    const t = state.placing.turn;
+    if (k === 'c') t.side = (t.side + (e.shiftKey ? SIDES.length - 1 : 1)) % SIDES.length;
+    else t.yaw += (k === 'z' ? -1 : 1) * (roomy(state.placing.preset.o) ? Math.PI / 2 : state.rotStep * DEG);
+    movePlaceGhost(placeGhost.hit);
+    return;
   }
   state.keys.add(e.code);
   const step = { ArrowUp: [1, 0, 0], ArrowDown: [-1, 0, 0], ArrowRight: [0, 1, 0], ArrowLeft: [0, -1, 0],
@@ -4728,10 +4968,7 @@ const recordsWin = setupRecords({
   newMagic: (kind) => magicWin.create({ kind }),
   editMagic: (id) => magicWin.edit(id),
   refreshMagic: () => magicWin.refresh(),
-  magicLines: (id) => {
-    const m = [...magicWin.newEnchants(), ...magicWin.newSpells()].find((x) => x.id === id);
-    return m ? m.effects || (m.note ? [m.note] : []) : [];
-  },
+  magicLines: (id) => magicWin.lines(id),
   newCell: () => cellsWin.create(),
   editCell: (name) => cellsWin.edit(name),
   goCell: (name) => loadCell(name),
@@ -4962,7 +5199,7 @@ const LAYOUT_MOVES = [['undo', 'n-bar-l'], ['redo', 'n-bar-l'], ['save', 'n-bar-
   ['lock-btn', 'n-view-list'], ['light-btn', 'n-view-list'], ['grid-btn', 'n-view-list'], ['owned-btn', 'n-view-list'], ['play', 'n-project-list'], ['history', 'n-project-list'], ['records', 'n-project-list'], ['phone', 'n-project-list'], ['proj-open', 'n-project-list']];
 const LAYOUT_TEXT = { drop: ['Drop onto surface', 'Drop'], swap: ['Swap model…', 'Swap…'], add: ['Add object…', 'Object…'],
                       'add-npc': ['Add NPC…', 'NPC…'], 'add-item': ['New item…', 'Item…'] };
-const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', reset: 'reset',
+const LAYOUT_ICONS = { 'proj-open': 'list', drop: 'downToLine', attach: 'link', group: 'group', duplicate: 'copy', swap: 'swap', blueprint: 'home', reset: 'reset',
                        'lock-btn': 'lock', 'light-btn': 'bulb', 'grid-btn': 'grid', 'owned-btn': 'person' };
 const layoutHome = new Map();
 const newLayout = () => document.body.classList.contains('layout-new');
@@ -5225,7 +5462,10 @@ function setupStudio() {
   const insp = make('div', 'inspector');
   insp.append($('sec-selected'));
   body.append(insp);
-  $('sel-edit').prepend($('n-modes'), $('qa-snaps'));
+  $('sel-edit').prepend($('n-modes'));
+  const snaps = make('div', 'snapbox');                 // the snap switches: at the view's top left, while they apply
+  snaps.append($('qa-snaps'));
+  body.append(snaps);
   const close = tool('insp-close', 'x', 'Deselect (Esc)');
   close.classList.add('ghost');
   close.addEventListener('click', () => select(null));
@@ -5258,13 +5498,13 @@ function updateHints() {
   const mod = mac ? 'Cmd' : 'Ctrl', alt = mac ? 'Option' : 'Alt';
   const isKey = (x) => /^([A-Z?]|Esc|Tab|Del|Cmd|Ctrl|Shift|PgUp|PgDn)$/.test(x);
   const n = state.selection.length;
-  const [what, hints] = $('place-banner').classList.contains('open') ? ['Placing', [['Click', 'put it there'], ['Right-drag', 'look around'], ['Esc', 'cancel']]]
+  const [what, hints] = $('place-banner').classList.contains('open') ? ['Placing', [['Click', 'put it there'], ['Z X', 'turn'], ['C', 'flip'], ['Right-drag', 'look around'], ['Esc', 'cancel']]]
     : $('dest-banner').classList.contains('open') ? ['Door destination', [['W A S D', 'fly to where the player arrives'], ['Right-drag', 'face the way they should']]]
     : document.body.classList.contains('mouse-look') ? ['Fly mode', [['W A S D', 'fly'], ['Q E', 'down, up'], ['Shift', 'faster'],
       ['Click', 'select at the crosshair'], ['Right-click', 'menu'], ['Arrows', 'move the object'], ['Z X', 'rotate'], ['G', 'drop'],
       ['B', 'attach'], ['Del', 'delete'], [mod + ' Z', 'undo'], ['Tab', 'leave fly mode']]]
-    : document.body.classList.contains('building') ? ['Room builder', [['Click, drag', 'place'], [alt + ' click', 'take away'],
-      ['Z X', 'turn'], ['PgUp PgDn', 'raise, lower'], ['Wheel', 'next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
+    : document.body.classList.contains('building') ? ['Room builder', [['Click', 'place'], [alt + ' click', 'remove a piece'],
+      ['Z X', 'turn'], ['PgUp PgDn', 'raise, lower'], ['[ ]', 'next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
       [mod + ' Z', 'undo'], ['Esc', 'done']]]
     : n ? [n > 1 ? `${n} selected` : 'Selected', [['Drag the arrows', 'move'], ['T R Y', 'move, rotate, scale'], ['G', 'drop onto the surface'],
       ['B', 'attach'], [mod + ' D', 'duplicate'], ...(n > 1 ? [[mod + ' G', 'group']] : [[mod + ' click', 'select more']]), ['Del', 'delete'],
@@ -5552,12 +5792,13 @@ async function refreshCell() {
     const name = state.cell?.name;
     if (!name) return;
     if (state.loadingCell) { setTimeout(refreshCell, 500); return; }
+    const had = new Set(objByKey.keys());                   // what's added while the answer is on its way stays
     const cell = await (await fetch('/api/cell', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                    body: JSON.stringify({ name, edits: state.edits }) })).json();
     if (state.cell?.name !== name || state.loadingCell) return;
     const fresh = new Map(cell.refs.map((r) => [r.key, r]));
     for (const [k, obj] of [...objByKey]) {
-      if (fresh.has(k)) continue;
+      if (fresh.has(k) || !had.has(k)) continue;
       world.remove(obj);
       obj.visible = false;
       objByKey.delete(k);

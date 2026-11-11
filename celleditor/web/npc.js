@@ -802,7 +802,7 @@ function build() {
 
 // what the pickers of the item and spell fields choose from
 const pickItem = (cur) => choose({ title: 'Choose an item', items: allItems(), current: cur });
-const allSpells = () => [...(api.magic?.newSpells() || []), ...lists.spells];
+const allSpells = () => (api.magic ? api.magic.spells(lists.spells) : lists.spells);
 const pickSpell = (cur) => choose({ title: 'Choose a spell', items: allSpells(), current: cur });
 
 function addRow(listId, placeholder, withCount, onAdd, pick) {

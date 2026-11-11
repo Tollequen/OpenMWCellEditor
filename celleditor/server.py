@@ -561,12 +561,14 @@ LIGHT_FALLBACKS = {"UseConstant": 0, "ConstantValue": 0.0, "UseLinear": 1, "Line
 NIGHT_FALLBACKS = {"Weather_Clear_Ambient_Night_Color": [32, 35, 42], "Weather_Clear_Sun_Night_Color": [59, 97, 176]}
 
 
-def light_info(oid, index=None):
-    """A light's {radius, color (0-255), flags, at (where its mesh has AttachLight, or None)}, or None."""
+def light_info(oid, index=None, mesh=None):
+    """A light's {radius, color (0-255), flags, at (where its mesh has AttachLight, or None)}, or None.
+
+    mesh: the model of a light the load order doesn't have (a new one): only `at` is known then."""
     index = model_index() if index is None else index
     rec = _lights.get(oid.lower())
     if not rec:
-        return None
+        return {"radius": 0, "color": [0, 0, 0], "flags": 0, "at": _light_point(mesh)} if mesh else None
     m = index.get(oid.lower())
     mesh = m[1] if m and m[1] and not m[1].lower().endswith("editormarker.nif") else None
     return {"radius": rec[0], "color": rec[1:4], "flags": rec[4], "at": _light_point(mesh) if mesh else None}
@@ -829,15 +831,24 @@ _room_sets = []
 
 
 def room_sets(sets=None):
-    """The user's room sets (for every project), saved again when given: [{name, pieces: [{id, pos, rz}]}]."""
+    """The user's blueprints (for every project), saved again when given: [{name, room, pieces: [{id, pos, rz, rot,
+    scale}]}] (room: it snaps to the grid and shows in the room builder; rot: all three angles of a tilted object)."""
     global _room_sets
     if sets is not None:
         clean = []
         for s in sets:
-            pieces = [{"id": str(p["id"]), "pos": [round(float(v), 2) for v in p["pos"][:3]], "rz": round(float(p.get("rz", 0)), 5)}
-                      for p in s.get("pieces") or [] if p.get("id") and len(p.get("pos") or []) >= 3]
+            pieces = []
+            for p in s.get("pieces") or []:
+                if not p.get("id") or len(p.get("pos") or []) < 3:
+                    continue
+                q = {"id": str(p["id"]), "pos": [round(float(v), 2) for v in p["pos"][:3]], "rz": round(float(p.get("rz", 0)), 5)}
+                if len(p.get("rot") or []) >= 3:
+                    q["rot"] = [round(float(v), 5) for v in p["rot"][:3]]
+                if p.get("scale") and abs(float(p["scale"]) - 1) > 1e-3:
+                    q["scale"] = round(float(p["scale"]), 3)
+                pieces.append(q)
             if str(s.get("name") or "").strip() and pieces:
-                clean.append({"name": str(s["name"]).strip()[:60], "pieces": pieces})
+                clean.append({"name": str(s["name"]).strip()[:60], "room": bool(s.get("room", True)), "pieces": pieces})
         if SETTINGS:
             SETTINGS.set("room_sets", clean)
         _room_sets = clean
@@ -1522,7 +1533,7 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/terrain":
                 return self.reply(json.dumps(terrain(int(q["x"]), int(q["y"]))).encode())
             if u.path == "/api/light":
-                return self.reply(json.dumps(light_info(q["id"])).encode())
+                return self.reply(json.dumps(light_info(q["id"], mesh=q.get("mesh"))).encode())
             if u.path == "/api/history":
                 return self.reply(json.dumps(history.summary()).encode())
             if u.path == "/api/history/version":

@@ -416,7 +416,7 @@ function open(info, r, place = null) {
     }
     if (ENCHANTED.includes(f.kind)) {
       const about = el('div', 'npc-hint it-effects');
-      const allEnchants = () => [...api.magic().newEnchants(), ...listData.enchants];
+      const allEnchants = () => api.magic().enchants(listData.enchants);
       const showEffects = () => {
         const e = f.enchant && allEnchants().find((x) => x.id.toLowerCase() === f.enchant.toLowerCase());
         about.textContent = e ? enchantLines(e).join('\n') : f.enchant ? 'No enchantment has this id.' : '';
