@@ -170,9 +170,10 @@ const snapKind = () => grid.mode || selKind();
 const gridSnap = (mesh) => grid[mesh === undefined ? snapKind() : isPiece(mesh) ? 'pieces' : 'other'];
 function setSnapMode(mode) { grid.mode = mode; updateSnap(); }
 
-// a position on the grid; moved: only the axes that were moved
+// a position on the grid when the switch that shows now is on (the room builder's there, else the selection's);
+// moved: only the axes that were moved. Only a room piece's height goes on the grid.
 function snapPiece(pos, mesh, moved = [true, true, true]) {
-  if (!gridSnap(mesh)) return pos;
+  if (!gridSnap()) return pos;
   const piece = isPiece(mesh);
   return pos.map((v, i) => (!moved[i] || (i === 2 && !piece) ? v : toStep(v, i === 2 ? GRID_Z : grid.step)));
 }
@@ -307,6 +308,14 @@ gizmo.addEventListener('objectChange', () => {
   const move = proxy.position.clone().sub(gizmoStart.pivot);
   const turn = new THREE.Matrix4().makeRotationFromQuaternion(proxy.quaternion.clone().multiply(gizmoStart.q.clone().invert()));
   const f = Math.max(proxy.scale.z, 1e-3);
+  // snap to grid: one object goes on the grid (the one clicked last) and the others move as far, so a group keeps its shape
+  let by = [move.x, move.y, move.z];
+  const lead = gizmoStart.items.has(state.selected) ? state.selected : gizmoStart.items.keys().next().value;
+  if (lead && gizmo.mode === 'translate') {
+    const from = gizmoStart.items.get(lead).pos;
+    const to = snapPiece(from.map((v, i) => v + by[i]), lead.userData.ref.mesh, by.map((v) => Math.abs(v) > 1e-4));
+    by = to.map((v, i) => v - from[i]);
+  }
   edit((r, obj) => {
     const s = gizmoStart.items.get(obj);
     if (!s) return;
@@ -320,8 +329,7 @@ gizmo.addEventListener('objectChange', () => {
       r.pos = p.toArray();
       r.rot = rotOf(turn.clone().multiply(rotMatrix(s.rot)));
     } else {
-      r.pos = snapPiece([s.pos[0] + move.x, s.pos[1] + move.y, s.pos[2] + move.z], r.mesh,
-                        [move.x, move.y, move.z].map((v) => Math.abs(v) > 1e-4));
+      r.pos = s.pos.map((v, i) => v + by[i]);
     }
   }, false);
 });
@@ -4159,7 +4167,12 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
   down = { x: e.clientX, y: e.clientY, button: e.button, onGizmo: gizmo.axis !== null && !state.mouseLook };
-  if (painter.on && e.button === 0 && !state.mouseLook && !state.picking) { down = null; startStroke(e); return; }
+  if (painter.on && e.button === 0 && !state.mouseLook && !state.picking) {
+    const moving = down.onGizmo;                           // dragging a selection's arrows builds nothing
+    down = null;
+    if (!moving) startStroke(e);
+    return;
+  }
   if (state.mouseLook) {
     if (e.button === 0 && state.picking) { pickStartAt(0, 0); return; }
     if (e.button === 0 && state.placing) { placeAt(0, 0, e.shiftKey); return; }
@@ -4200,7 +4213,8 @@ window.addEventListener('mouseup', (e) => {
 });
 canvas.addEventListener('dblclick', (e) => {
   if (fromTouch() || state.mouseLook) return;
-  pickAt(...ndc(e.clientX, e.clientY), e.metaKey || e.ctrlKey, true);
+  // one object of a group; in the room builder, where a click builds, the whole group (Alt: one object)
+  pickAt(...ndc(e.clientX, e.clientY), e.metaKey || e.ctrlKey, painter.on ? e.altKey : true);
 });
 window.addEventListener('mousemove', (e) => {
   if (painter.on && !state.mouseLook) paintHover(e);
