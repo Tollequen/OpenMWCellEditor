@@ -4167,10 +4167,13 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
   down = { x: e.clientX, y: e.clientY, button: e.button, onGizmo: gizmo.axis !== null && !state.mouseLook };
+  // a left drag that isn't on the arrows draws a box that selects
+  down.box = e.button === 0 && !down.onGizmo && !state.mouseLook && !state.placing && !state.picking;
   if (painter.on && e.button === 0 && !state.mouseLook && !state.picking) {
-    const moving = down.onGizmo;                           // dragging a selection's arrows builds nothing
+    // dragging a selection's arrows builds nothing; with Shift, or with nothing chosen, the click or drag selects
+    if (down.onGizmo || (!e.altKey && (e.shiftKey || !brush()))) return;
     down = null;
-    if (!moving) startStroke(e);
+    startStroke(e);
     return;
   }
   if (state.mouseLook) {
@@ -4202,7 +4205,10 @@ window.addEventListener('mouseup', (e) => {
       else if (state.placing) stopPlacing(); else openMenuAt(down.x, down.y);
     }
   }
-  if (e.button === 0 && down && !down.onGizmo && !state.mouseLook && e.target === canvas
+  if (e.button === 0 && down?.boxing) {
+    $('select-box').style.display = 'none';
+    boxSelect(down.x, down.y, e.clientX, e.clientY, e.metaKey || e.ctrlKey);
+  } else if (e.button === 0 && down && !down.onGizmo && !state.mouseLook && e.target === canvas
       && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) {
     const [nx, ny] = ndc(e.clientX, e.clientY);
     if (state.picking) pickStartAt(nx, ny);
@@ -4216,7 +4222,33 @@ canvas.addEventListener('dblclick', (e) => {
   // one object of a group; in the room builder, where a click builds, the whole group (Alt: one object)
   pickAt(...ndc(e.clientX, e.clientY), e.metaKey || e.ctrlKey, painter.on ? e.altKey : true);
 });
+// The drag box: the objects whose middle is inside it are selected, with their groups (Cmd/Ctrl: added to the
+// selection); walls and floors only when they aren't locked. What is behind a wall counts too.
+function boxSelect(x0, y0, x1, y1, add) {
+  const r = canvas.getBoundingClientRect();
+  const inside = (x, y) => x >= Math.min(x0, x1) && x <= Math.max(x0, x1) && y >= Math.min(y0, y1) && y <= Math.max(y0, y1);
+  const locked = $('lock').checked;
+  camera.updateMatrixWorld();
+  const found = new Set(), c = new THREE.Vector3(), box = new THREE.Box3();
+  for (const o of objByKey.values()) {
+    if (!visibleChain(o) || (locked && o.userData.ref.structure)) continue;
+    if (box.setFromObject(o).isEmpty()) o.getWorldPosition(c); else box.getCenter(c);
+    c.project(camera);
+    if (c.z < -1 || c.z > 1 || !inside(r.left + (c.x + 1) / 2 * r.width, r.top + (1 - c.y) / 2 * r.height)) continue;
+    for (const m of groupMembers(o)) found.add(m);
+  }
+  closeMenu();
+  setSelection(add ? [...new Set([...state.selection, ...found])] : [...found]);
+  status(found.size ? `Selected ${found.size === 1 ? 'an object' : `${found.size} objects`}.`
+    : locked ? 'Nothing in the box (walls and floors are locked).' : 'Nothing in the box.');
+}
+
 window.addEventListener('mousemove', (e) => {
+  if (down?.box && !gizmo.dragging && (down.boxing || Math.hypot(e.clientX - down.x, e.clientY - down.y) >= 5)) {
+    down.boxing = true;
+    Object.assign($('select-box').style, { display: 'block', left: Math.min(down.x, e.clientX) + 'px', top: Math.min(down.y, e.clientY) + 'px',
+                                           width: Math.abs(e.clientX - down.x) + 'px', height: Math.abs(e.clientY - down.y) + 'px' });
+  }
   if (painter.on && !state.mouseLook) paintHover(e);
   if (state.placing && !state.looking && e.target === canvas) {
     const hit = surfaceAt(...(state.mouseLook ? [0, 0] : ndc(e.clientX, e.clientY)));
@@ -5692,12 +5724,12 @@ function updateHints() {
       ['Click', 'select at the crosshair'], ['Right-click', 'menu'], ['Arrows', 'move the object'], ['Z X', 'rotate'], ['G', 'drop'],
       ['B', 'attach'], ['Del', 'delete'], [mod + ' Z', 'undo'], ['Tab', 'leave fly mode']]]
     : document.body.classList.contains('building') ? ['Room builder', [['Click', 'place'], [alt + ' click', 'remove a piece'],
-      ['Z X', 'turn'], ['↑ ↓', 'raise, lower'], ['← →', 'previous, next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
+      ['Shift drag', 'select'], ['Z X', 'turn'], ['↑ ↓', 'raise, lower'], ['← →', 'previous, next piece'], ['Right-drag', 'look around'], ['W A S D', 'move'],
       [mod + ' Z', 'undo'], ['Esc', 'done']]]
     : n ? [n > 1 ? `${n} selected` : 'Selected', [['Drag the arrows', 'move'], ['T R Y', 'move, rotate, scale'], ['G', 'drop onto the surface'],
       ['B', 'attach'], [mod + ' D', 'duplicate'], ...(n > 1 ? [[mod + ' G', 'group']] : [[mod + ' click', 'select more']]), ['Del', 'delete'],
       ['F', 'focus'], ['Right-click', 'more'], ['Esc', 'deselect']]]
-    : ['', [['Click', 'select'], ['Right-click', 'add here, menu'], ['Right-drag', 'look around'], ['W A S D', 'fly'], ['Q E', 'down, up'],
+    : ['', [['Click', 'select'], ['Drag', 'select several'], ['Right-click', 'add here, menu'], ['Right-drag', 'look around'], ['W A S D', 'fly'], ['Q E', 'down, up'],
       ['Scroll', 'forward, back'], ['Tab', 'fly mode'], ['L', 'lock walls'], ['?', 'guide']]];
   const key = what + '|' + hints.length;
   if (bar.dataset.key === key) return;

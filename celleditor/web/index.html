@@ -149,6 +149,8 @@
 
   #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
                border-radius: 50%; background: rgba(255, 255, 255, .5); pointer-events: none; display: none; }
+  #select-box { position: fixed; display: none; z-index: 5; pointer-events: none; border: 1px solid var(--accent);
+    background: var(--accent-soft); }
   #loading { position: fixed; left: 12px; bottom: 12px; color: var(--dim); background: var(--float); padding: 5px 10px;
              border: 1px solid var(--line); border-radius: var(--radius); z-index: 1; }
   #show-panel { position: fixed; top: 10px; left: 10px; z-index: 4; display: none; }
@@ -810,6 +812,7 @@
   <dl>
     <dt>Click</dt><dd>Place the piece or blueprint</dd>
     <dt><kbd class="alt">Alt</kbd>+click</dt><dd>Remove a piece you added (drag for more)</dd>
+    <dt><kbd>Shift</kbd>+drag</dt><dd>Select what is in the box; double-click selects one</dd>
     <dt><kbd>Z</kbd><kbd>X</kbd></dt><dd>Turn by a quarter</dd>
     <dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>Raise, lower by 64</dd>
     <dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Previous, next piece</dd>
@@ -835,6 +838,7 @@
     <dt><kbd class="mod">Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo; <kbd class="mod">Ctrl</kbd>+<kbd>S</kbd> to save</dd>
   </dl>
 </div>
+<div id="select-box"></div>
 <div id="loading">Loading…</div>
 <div id="panel">
   <div id="rb-panel">
@@ -991,6 +995,7 @@
         <b>W A S D</b> fly, <b>Q</b> down, <b>E</b> up, <b>Shift</b> faster; <b>scroll</b> forward / back<br>
         <b>Left click</b> select, <b>Esc</b> deselect<br>
         <b>Cmd/Ctrl + click</b> select multiple: move, rotate, scale and delete together<br>
+        <b>Drag</b> a box: select everything in it (with Cmd/Ctrl: add to the selection); in the room builder <b>Shift + drag</b><br>
         <b>Cmd/Ctrl + G</b> group objects; <b>Alt + click</b> or <b>double-click</b> selects an individual object in the group<br>
         <b>Right click</b> (no drag): quick menu (swap model, delete, attach, add here…)<br>
         <b>P</b> hide / show the panel, <b>?</b> quick guide<br>

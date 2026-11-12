@@ -94,6 +94,7 @@ Fly around cells, place clutter, drop items neatly onto tables, and save changes
 ### Manipulation & Placement
 | Action | Key / Input |
 |---|---|
+| Select several | Drag a box (`Shift` + drag in the room builder), or `Ctrl/Cmd + Click` |
 | Move Gizmo | `T` |
 | Rotate Gizmo | `R` |
 | Scale Gizmo | `Y` (OpenMW clamps between 0.5 – 2.0) |
