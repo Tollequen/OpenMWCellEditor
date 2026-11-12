@@ -2954,17 +2954,24 @@ function placePose(hit, o, box, turn = null) {
 async function putBlueprint(b, { pos, rot }) {
   const from = state.undo.length, before = entriesOf(state.edits);
   const base = refMatrix({ pos, rot, scale: 1 });
+  const keys = [];
   for (const it of b.items) {
     const w = base.clone().multiply(refMatrix({ pos: it.rel, rot: it.rot, scale: 1 }));
-    await addPiece(it.o, new THREE.Vector3().setFromMatrixPosition(w).toArray().map((v) => Math.round(v * 100) / 100), rotOf(w), it.scale);
+    keys.push(await addPiece(it.o, new THREE.Vector3().setFromMatrixPosition(w).toArray().map((v) => Math.round(v * 100) / 100), rotOf(w), it.scale));
   }
+  if (b.group) groupPlaced(keys);
   if (b.items.length > 1) {
     joinSteps(from, before);
     if (state.undo.length > from) state.undo[state.undo.length - 1].label = `placed ${b.name}`;
   }
   refreshVisibility();
   updateDirty();
-  status(`Placed the blueprint ${b.name} (${b.items.length} objects).`);
+  status(`Placed the blueprint ${b.name} (${b.items.length} objects)${b.group ? ', as a group' : ''}.`);
+}
+
+// a blueprint without walls or floors is placed as one group: a click selects all of it
+function groupPlaced(keys) {
+  if (keys.length > 1) state.edits.groups['g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)] = keys;
 }
 
 // see-through models: items [{o, rel, rot, scale}] as one group (not hit by clicks)
@@ -3138,7 +3145,8 @@ async function loadPieces() {
 
 // The blueprints: the editor's own rooms (rooms.js) and the user's, as [{name, room, ready, style, items}] with
 // items [{o: the catalogue's object, rel, rot, scale}]. There is one kind of blueprint; `room` (most of it is
-// walls and floors) only says whose snap setting applies and that it turns by quarters, as for single objects. One of the editor's is left out when the load order lacks a
+// walls and floors) only says whose snap setting applies and that it turns by quarters, as for single objects;
+// `group` (no wall, floor or door in it: furniture) says it is placed as one group. One of the editor's is left out when the load order lacks a
 // piece of it; a user's keeps the objects that are there.
 function blueprintsOf(catalog, sets) {
   const byId = new Map(catalog.map((o) => [o.id.toLowerCase(), o]));
@@ -3150,7 +3158,8 @@ function blueprintsOf(catalog, sets) {
       .filter((it) => it.o && it.o.mesh);
     return items.length && !(b.ready && items.length < b.pieces.length)
       ? { name: b.name, style: b.style || null, ready: !!b.ready,
-          room: !!b.ready || items.filter((it) => isPiece(it.o.mesh)).length * 2 > items.length, items } : null;
+          room: !!b.ready || items.filter((it) => isPiece(it.o.mesh)).length * 2 > items.length,
+          group: !b.ready && items.length > 1 && !items.some((it) => isPiece(it.o.mesh)), items } : null;
   }).filter(Boolean);
 }
 // as the Add object window lists them
@@ -3376,7 +3385,7 @@ function pickSet(s) {
 // what a click puts down: pieces relative to the square's centre at the builder's height, unturned
 function brush() {
   if (painter.idle) return null;                           // a blueprint was just placed: nothing is chosen
-  if (painter.set) return { key: 'blueprint:' + painter.set.name, items: painter.set.items };
+  if (painter.set) return { key: 'blueprint:' + painter.set.name, items: painter.set.items, group: painter.set.group };
   const o = painter.pieces[painter.at];
   return o ? { key: 'piece:' + o.id + ':' + painter.lift, items: [{ o, rel: [0, 0, painter.lift], rot: [0, 0, 0], scale: 1 }] } : null;
 }
@@ -3472,6 +3481,7 @@ async function addPiece(o, pos, rot, scale = 1) {
   world.add(obj);
   objByKey.set(r.key, obj);
   state.undo.push({ obj, added: uid });
+  return r.key;
 }
 
 // put the brush where the ghost is (once per square in a stroke, and not on the same pieces)
@@ -3484,6 +3494,7 @@ async function paintHere() {
   stroke.done.add(sq);
   const m = brushMatrix();
   const gone = new Set(state.edits.deleted);
+  const keys = [];
   for (const it of b.items) {
     const w = m.clone().multiply(refMatrix({ pos: it.rel, rot: it.rot, scale: 1 }));
     const pos = new THREE.Vector3().setFromMatrixPosition(w).toArray().map((v) => Math.round(v * 100) / 100);
@@ -3491,9 +3502,10 @@ async function paintHere() {
     const same = state.edits.added.some((a) => a.cell === state.cell.name && a.id === it.o.id && !gone.has('added|' + a.uid)
       && a.pos.every((v, i) => Math.abs(v - pos[i]) < 0.5) && Math.cos(a.rot[2] - rot[2]) > 0.9999);
     if (same) continue;
-    await addPiece(it.o, pos, rot, it.scale);
+    keys.push(await addPiece(it.o, pos, rot, it.scale));
     stroke.count++;
   }
+  if (b.group) groupPlaced(keys);
   refreshVisibility();
   updateDirty();
 }
@@ -3512,7 +3524,7 @@ function endStroke() {
     if (state.undo.length > s.from) state.undo[state.undo.length - 1].label = s.gone ? `removed ${s.gone} pieces` : `built ${s.count} pieces`;
   }
   if (s.done.size && !s.erase && painter.set) {            // a blueprint is placed once, then nothing is chosen
-    status(`Placed the blueprint ${painter.set.name} (${painter.set.items.length} objects).`);
+    status(`Placed the blueprint ${painter.set.name} (${painter.set.items.length} objects)${painter.set.group ? ', as a group' : ''}.`);
     painter.set = null;
     painter.idle = true;
     paintSelection();
